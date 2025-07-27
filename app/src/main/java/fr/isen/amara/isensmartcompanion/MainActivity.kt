@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import fr.isen.amara.isensmartcompanion.screens.LoginScreen
 import fr.isen.amara.isensmartcompanion.screens.RegisterScreen
+import fr.isen.amara.isensmartcompanion.screens.ResetPasswordScreen
 import fr.isen.amara.isensmartcompanion.ui.theme.ISENSmartCompanionTheme
 
 class MainActivity : ComponentActivity() {
@@ -27,8 +28,10 @@ class MainActivity : ComponentActivity() {
                         composable("register") {
                             RegisterScreen(navController)
                         }
+                        composable("reset_password") {
+                            ResetPasswordScreen(navController)
+                        }
                         composable("home") {
-                            // Page d'accueil (à créer selon ton app)
                             Surface {
                                 androidx.compose.material3.Text("Bienvenue ! (Home screen)")
                             }

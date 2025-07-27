@@ -3,7 +3,6 @@ package fr.isen.amara.isensmartcompanion.screens
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
@@ -71,25 +70,32 @@ fun LoginScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(onClick = {
-                coroutineScope.launch {
-                    try {
-                        FirebaseAuth.getInstance()
-                            .signInWithEmailAndPassword(email.value.trim(), password.value)
-                            .await()
-                        snackbarHostState.showSnackbar("✅ Connexion réussie")
-                        navController.navigate("home") {
-                            popUpTo("login") { inclusive = true }
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        try {
+                            FirebaseAuth.getInstance()
+                                .signInWithEmailAndPassword(email.value.trim(), password.value)
+                                .await()
+                            snackbarHostState.showSnackbar("✅ Connexion réussie")
+                            navController.navigate("home") {
+                                popUpTo("login") { inclusive = true }
+                            }
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar(" ${e.localizedMessage ?: "Erreur de connexion"}")
                         }
-                    } catch (e: Exception) {
-                        snackbarHostState.showSnackbar(" ${e.localizedMessage ?: "Erreur de connexion"}")
                     }
-                }
-            }, modifier = Modifier.fillMaxWidth()) {
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text("Se connecter")
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            TextButton(onClick = { navController.navigate("reset_password") }) {
+                Text("Mot de passe oublié ?")
+            }
 
             TextButton(onClick = { navController.navigate("register") }) {
                 Text("Pas de compte ? Créer un compte")
