@@ -15,7 +15,7 @@ import kotlinx.coroutines.delay
 import android.util.Log
 import android.graphics.Color
 import kotlinx.coroutines.launch
-import fr.isen.amara.isensmartcompanion.MainActivity
+import fr.isen.amara.isensmartcompanion.MainActivity  // <-- Ici l'import correct
 import fr.isen.amara.isensmartcompanion.R
 
 class NotificationViewModel : ViewModel() {
@@ -58,7 +58,6 @@ class NotificationViewModel : ViewModel() {
             } else {
                 Log.e("Notification", "Permission de notification refusée")
             }
-
         }
     }
 }

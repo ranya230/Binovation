@@ -94,6 +94,7 @@ dependencies {
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.8.1")
+    implementation("io.coil-kt:coil-compose:2.5.0")
 
     // Tests
     testImplementation("junit:junit:4.13.2")
