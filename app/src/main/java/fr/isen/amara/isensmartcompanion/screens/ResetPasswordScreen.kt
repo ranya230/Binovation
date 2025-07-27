@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,15 +42,18 @@ fun ResetPasswordScreen(navController: NavController) {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Entrez votre email pour recevoir un lien de réinitialisation", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "Entrez votre email pour recevoir un lien de réinitialisation",
+                style = MaterialTheme.typography.bodyLarge
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email.value,
-                onValueChange = { email.value = it },
+                onValueChange = { email.value = it.trim() },
                 label = { Text("Email") },
-                leadingIcon = { Icon(Icons.Default.Email, null) },
+                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -59,12 +63,15 @@ fun ResetPasswordScreen(navController: NavController) {
                 onClick = {
                     coroutineScope.launch {
                         try {
+                            // ✅ Très important : await pour attendre la réponse
                             FirebaseAuth.getInstance()
-                                .sendPasswordResetEmail(email.value.trim())
+                                .sendPasswordResetEmail(email.value)
+                                .await()
+
                             snackbarHostState.showSnackbar(" Email de réinitialisation envoyé")
-                            navController.popBackStack() // Retour à la page de login
+                            navController.popBackStack()
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(" Erreur : ${e.localizedMessage}")
+                            snackbarHostState.showSnackbar(" Erreur : ${e.localizedMessage ?: "échec"}")
                         }
                     }
                 },
