@@ -1,53 +1,40 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
-import fr.isen.amara.isensmartcompanion.R
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginScreen(navController: NavController) {
+fun LoginScreen(
+    onLoginSuccess: () -> Unit,
+    onNavigateToRegister: () -> Unit,
+    onNavigateToResetPassword: () -> Unit
+) {
     val email = remember { mutableStateOf("") }
     val password = remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { padding ->
+    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .padding(padding)
-                .padding(32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(32.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.login_illustration),
-                contentDescription = null,
-                modifier = Modifier.size(140.dp)
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             Text("Connexion", style = MaterialTheme.typography.headlineSmall)
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email.value,
@@ -72,17 +59,14 @@ fun LoginScreen(navController: NavController) {
 
             Button(
                 onClick = {
-                    coroutineScope.launch {
+                    scope.launch {
                         try {
                             FirebaseAuth.getInstance()
                                 .signInWithEmailAndPassword(email.value.trim(), password.value)
                                 .await()
-                            snackbarHostState.showSnackbar("✅ Connexion réussie")
-                            navController.navigate("home") {
-                                popUpTo("login") { inclusive = true }
-                            }
+                            onLoginSuccess()
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(" ${e.localizedMessage ?: "Erreur de connexion"}")
+                            snackbarHostState.showSnackbar("Erreur : ${e.localizedMessage}")
                         }
                     }
                 },
@@ -93,11 +77,11 @@ fun LoginScreen(navController: NavController) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            TextButton(onClick = { navController.navigate("reset_password") }) {
+            TextButton(onClick = onNavigateToResetPassword) {
                 Text("Mot de passe oublié ?")
             }
 
-            TextButton(onClick = { navController.navigate("register") }) {
+            TextButton(onClick = onNavigateToRegister) {
                 Text("Pas de compte ? Créer un compte")
             }
         }

@@ -2,58 +2,40 @@ package fr.isen.amara.isensmartcompanion.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ResetPasswordScreen(navController: NavController) {
+fun ResetPasswordScreen(
+    onNavigateBackToLogin: () -> Unit
+) {
     val email = remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Réinitialiser le mot de passe") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Retour")
-                    }
-                }
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { padding ->
+    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(32.dp)
+                .fillMaxSize(),
+            verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                "Entrez votre email pour recevoir un lien de réinitialisation",
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Text("Réinitialisation du mot de passe", style = MaterialTheme.typography.headlineSmall)
 
             Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email.value,
-                onValueChange = { email.value = it.trim() },
+                onValueChange = { email.value = it },
                 label = { Text("Email") },
-                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
+                leadingIcon = { Icon(Icons.Default.Email, null) },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -61,23 +43,23 @@ fun ResetPasswordScreen(navController: NavController) {
 
             Button(
                 onClick = {
-                    coroutineScope.launch {
+                    scope.launch {
                         try {
-                            // ✅ Très important : await pour attendre la réponse
-                            FirebaseAuth.getInstance()
-                                .sendPasswordResetEmail(email.value)
-                                .await()
-
-                            snackbarHostState.showSnackbar(" Email de réinitialisation envoyé")
-                            navController.popBackStack()
+                            FirebaseAuth.getInstance().sendPasswordResetEmail(email.value.trim()).await()
+                            snackbarHostState.showSnackbar("Email de réinitialisation envoyé.")
+                            onNavigateBackToLogin()
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(" Erreur : ${e.localizedMessage ?: "échec"}")
+                            snackbarHostState.showSnackbar("Erreur : ${e.localizedMessage}")
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Envoyer")
+                Text("Envoyer l’email")
+            }
+
+            TextButton(onClick = onNavigateBackToLogin) {
+                Text("Retour")
             }
         }
     }

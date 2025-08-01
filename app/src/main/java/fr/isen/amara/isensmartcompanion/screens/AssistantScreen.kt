@@ -6,8 +6,6 @@ import android.speech.RecognizerIntent
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -33,9 +31,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.*
+import fr.isen.amara.isensmartcompanion.data.InteractionViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.ai.client.generativeai.GenerativeModel
-import fr.isen.amara.isensmartcompanion.data.InteractionViewModel
 
 @Composable
 fun AssistantScreen(viewModel: InteractionViewModel = viewModel()) {
@@ -249,23 +247,5 @@ fun VoiceSearchButton(onVoiceInput: (String) -> Unit) {
             .background(if (isListening) Color.Green else Color(0xFFB71C1C), shape = CircleShape)
     ) {
         Icon(imageVector = Icons.Default.Mic, contentDescription = "Recherche vocale", tint = Color.White)
-    }
-}
-
-@Composable
-fun RequestAudioPermission(onPermissionGranted: () -> Unit) {
-    val context = LocalContext.current
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            onPermissionGranted()
-        } else {
-            Toast.makeText(context, "Permission audio refusée", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
     }
 }

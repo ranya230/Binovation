@@ -1,73 +1,46 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
-import coil.compose.rememberAsyncImagePainter
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import fr.isen.amara.isensmartcompanion.R
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RegisterScreen(navController: NavController) {
+fun RegisterScreen(
+    onRegisterSuccess: () -> Unit,
+    onNavigateToLogin: () -> Unit
+) {
     val email = remember { mutableStateOf("") }
-    val username = remember { mutableStateOf("") }
     val password = remember { mutableStateOf("") }
     val confirmPassword = remember { mutableStateOf("") }
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Créer un compte") },
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigate("login") }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Retour à la connexion")
-                    }
-                }
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { paddingValues ->
+    Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .padding(paddingValues),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(padding)
+                .padding(32.dp)
+                .fillMaxSize(),
             verticalArrangement = Arrangement.Center
         ) {
+            Text("Créer un compte", style = MaterialTheme.typography.headlineSmall)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             OutlinedTextField(
                 value = email.value,
-                onValueChange = { email.value = it.trim() },
+                onValueChange = { email.value = it },
                 label = { Text("Email") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedTextField(
-                value = username.value,
-                onValueChange = { username.value = it },
-                label = { Text("Nom d'utilisateur") },
-                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Email, null) },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -77,7 +50,7 @@ fun RegisterScreen(navController: NavController) {
                 value = password.value,
                 onValueChange = { password.value = it },
                 label = { Text("Mot de passe") },
-                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Lock, null) },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -87,8 +60,8 @@ fun RegisterScreen(navController: NavController) {
             OutlinedTextField(
                 value = confirmPassword.value,
                 onValueChange = { confirmPassword.value = it },
-                label = { Text("Confirmer mot de passe") },
-                singleLine = true,
+                label = { Text("Confirmer le mot de passe") },
+                leadingIcon = { Icon(Icons.Default.Lock, null) },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
@@ -97,44 +70,28 @@ fun RegisterScreen(navController: NavController) {
 
             Button(
                 onClick = {
-                    coroutineScope.launch {
+                    scope.launch {
+                        if (password.value != confirmPassword.value) {
+                            snackbarHostState.showSnackbar("Les mots de passe ne correspondent pas.")
+                            return@launch
+                        }
                         try {
-                            if (email.value.isBlank() || username.value.isBlank() || password.value.isBlank()) {
-                                snackbarHostState.showSnackbar(" Remplissez tous les champs")
-                                return@launch
-                            }
-                            if (password.value != confirmPassword.value) {
-                                snackbarHostState.showSnackbar(" Les mots de passe ne correspondent pas")
-                                return@launch
-                            }
-
-                            val auth = FirebaseAuth.getInstance()
-                            // Vérifier si l'email est déjà utilisé
-                            val signInMethods = auth.fetchSignInMethodsForEmail(email.value).await()
-                            if (signInMethods.signInMethods?.isNotEmpty() == true) {
-                                snackbarHostState.showSnackbar(" Cet email est déjà utilisé")
-                                return@launch
-                            }
-
-                            // Sinon créer le compte
-                            val result = auth.createUserWithEmailAndPassword(email.value, password.value).await()
-                            val userId = result.user?.uid
-
-                            if (userId != null) {
-                                // Sauvegarder user dans Firestore si besoin ici
-                                snackbarHostState.showSnackbar(" Compte créé avec succès")
-                                navController.navigate("login") {
-                                    popUpTo("register") { inclusive = true }
-                                }
-                            }
+                            FirebaseAuth.getInstance()
+                                .createUserWithEmailAndPassword(email.value.trim(), password.value)
+                                .await()
+                            onRegisterSuccess()
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar(" Erreur : ${e.localizedMessage ?: "erreur inconnue"}")
+                            snackbarHostState.showSnackbar("Erreur : ${e.localizedMessage}")
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Créer un compte")
+                Text("S'inscrire")
+            }
+
+            TextButton(onClick = onNavigateToLogin) {
+                Text("Déjà un compte ? Se connecter")
             }
         }
     }

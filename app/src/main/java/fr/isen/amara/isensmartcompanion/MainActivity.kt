@@ -3,14 +3,15 @@ package fr.isen.amara.isensmartcompanion
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import fr.isen.amara.isensmartcompanion.screens.LoginScreen
-import fr.isen.amara.isensmartcompanion.screens.RegisterScreen
-import fr.isen.amara.isensmartcompanion.screens.ResetPasswordScreen
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.*
+import fr.isen.amara.isensmartcompanion.screens.*
 import fr.isen.amara.isensmartcompanion.ui.theme.ISENSmartCompanionTheme
 
 class MainActivity : ComponentActivity() {
@@ -18,26 +19,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             ISENSmartCompanionTheme {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    val navController = rememberNavController()
-
-                    NavHost(navController = navController, startDestination = "login") {
-                        composable("login") {
-                            LoginScreen(navController)
-                        }
-                        composable("register") {
-                            RegisterScreen(navController)
-                        }
-                        composable("reset_password") {
-                            ResetPasswordScreen(navController)
-                        }
-                        composable("home") {
-                            Surface {
-                                androidx.compose.material3.Text("Bienvenue ! (Home screen)")
-                            }
-                        }
-                    }
-                }
+                val navController = rememberNavController()
+                AuthNavigation(navController)
             }
         }
     }
