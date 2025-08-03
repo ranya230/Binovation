@@ -1,7 +1,7 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -10,86 +10,103 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import org.eclipse.paho.client.mqttv3.*
-import org.json.JSONObject
 import kotlin.math.roundToInt
+import org.json.JSONObject
+import androidx.compose.ui.platform.LocalContext
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Composable
 fun AnalysisScreen() {
+    val context = LocalContext.current
     val mqttClient = remember { MqttClientHelper() }
-    val coroutineScope = rememberCoroutineScope()
-    var distance by remember { mutableStateOf(30f) }
-    val fillPercent = ((30f - distance) / 30f * 100f).coerceIn(0f, 100f).roundToInt()
+    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
+    val history = remember { mutableStateListOf<Pair<Float, Long>>() }
 
-    var previousDistance by remember { mutableStateOf(30f) }
-    var fillRatePerDay by remember { mutableStateOf(5) }
-    val estimatedDaysLeft = ((100 - fillPercent) / fillRatePerDay.toFloat()).coerceAtLeast(0f).roundToInt()
+    var lastUpdateTime by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(Unit) {
-        mqttClient.connectAndSubscribe("smartbin/status") { message ->
+        mqttClient.connectAndSubscribe("Distance") { message ->
             try {
                 val json = JSONObject(message)
-                val newDist = json.getDouble("distance").toFloat()
-                if (newDist != distance) {
-                    previousDistance = distance
-                    distance = newDist
-                }
+                val distance = json.getDouble("distance").toFloat()
+                val percent = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
+                val timestamp = System.currentTimeMillis()
+                history.add(percent to timestamp)
+                if (history.size > 100) history.removeAt(0)
+                lastUpdateTime = timestamp
             } catch (_: Exception) {}
         }
     }
 
+    val now = System.currentTimeMillis()
+    val oneHourMs = 60 * 60 * 1000
+
+    val usagePattern = remember(history) {
+        val lastDay = history.filter { now - it.second <= 24 * oneHourMs }
+        val mostUsedHour = lastDay.groupBy {
+            Calendar.getInstance().apply { timeInMillis = it.second }.get(Calendar.HOUR_OF_DAY)
+        }.maxByOrNull { it.value.size }?.key
+
+        val averageDelta = if (lastDay.size >= 2) {
+            val deltas = lastDay.zipWithNext { a, b -> b.second - a.second }
+            deltas.map { it / 1000 }.average().toInt()
+        } else null
+
+        Pair(mostUsedHour, averageDelta)
+    }
+
+    val fillPercentage = history.lastOrNull()?.first?.roundToInt() ?: 0
+    val estFullTime = if (history.size >= 3) {
+        val delta = history.last().first - history.first().first
+        val timeElapsed = (history.last().second - history.first().second) / 1000
+        if (delta > 5) {
+            val ratePerSecond = delta / timeElapsed
+            val remaining = 100 - history.last().first
+            val secondsToFull = (remaining / ratePerSecond).toLong()
+            SimpleDateFormat("HH:mm").format(Date(now + secondsToFull * 1000))
+        } else null
+    } else null
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
-            .background(Color.White),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            "Smart Bin Analysis",
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFF333333)
-        )
+        Text("Smart Bin Analysis", fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-        LinearProgressIndicator(
-            progress = fillPercent / 100f,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(12.dp),
-            color = Color(0xFF444444)
-        )
-
-        Text(
-            "Current Fill Level: $fillPercent%",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Medium
-        )
-
-        Divider(thickness = 1.dp)
-
-        Text("Estimated Daily Fill Rate: $fillRatePerDay%", fontSize = 16.sp)
-        Text("Estimated Days Until Full: $estimatedDaysLeft days", fontSize = 16.sp)
-
-        Divider(thickness = 1.dp)
-
-        Text("Last Measured Distance: ${distance} cm", fontSize = 16.sp, color = Color.Gray)
-        Text("Previous Distance: $previousDistance cm", fontSize = 16.sp, color = Color.Gray)
-
-        Divider(thickness = 1.dp)
-
-        Button(
-            onClick = {
-                coroutineScope.launch(Dispatchers.IO) {
-                    mqttClient.publish("smartbin/scan", "start")
-                }
-            },
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Re-scan Now")
+            Column(Modifier.padding(16.dp)) {
+                Text("Current Fill Level: $fillPercentage%", fontSize = 18.sp)
+                if (estFullTime != null)
+                    Text("Estimated full at: $estFullTime", fontSize = 14.sp, color = Color.Gray)
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF78E6FF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Usage Pattern", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                if (usagePattern.first != null)
+                    Text("Most active hour: ${usagePattern.first}h")
+                if (usagePattern.second != null)
+                    Text("Avg. interval between updates: ${usagePattern.second} sec")
+            }
+        }
+
+        if (lastUpdateTime != null) {
+            val last = Date(lastUpdateTime!!)
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+            Text("Last update: ${sdf.format(last)}", fontSize = 13.sp, color = Color.Gray)
         }
     }
 }

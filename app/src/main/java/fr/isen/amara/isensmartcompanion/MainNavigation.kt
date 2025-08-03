@@ -50,8 +50,11 @@ fun MainNavigation() {
             composable("assistant") { AssistantScreen() }
             composable("settings") { SettingsScreen() }
 
-            // ✅ Ajout de la route "binState"
+            // ✅ Routes supplémentaires
             composable("binState") { BinStateScreen() }
+            composable("binLevel") { BinLevelScreen() }
+            composable("history") { HistoryScreen() }
+            composable("analysis") { AnalysisScreen() }
         }
     }
 }

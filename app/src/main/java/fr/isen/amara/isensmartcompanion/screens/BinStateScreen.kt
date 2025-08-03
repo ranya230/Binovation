@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 import fr.isen.amara.isensmartcompanion.R
 import kotlin.math.roundToInt
-
 @Composable
 fun BinStateScreen() {
     val context = LocalContext.current
@@ -78,7 +77,13 @@ fun BinStateScreen() {
             .padding(horizontal = 20.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Image + Fill level
+        // ✅ Titre principal
+        Text(
+            text = "Bin State",
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
         Image(
             painter = painterResource(id = R.drawable.poubelle),
             contentDescription = "Trash Bin",
@@ -100,7 +105,6 @@ fun BinStateScreen() {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // System Analysis Card
         if (trend != null || estimatedTimeHours != null || secondsSinceUpdate != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -123,7 +127,6 @@ fun BinStateScreen() {
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // History Card
         if (history.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),

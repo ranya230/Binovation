@@ -18,25 +18,16 @@ import org.json.JSONObject
 import androidx.navigation.NavController
 import fr.isen.amara.isensmartcompanion.R
 
-/**
- * Enregistre la distance maximale dans les préférences
- */
 fun saveMaxDistance(context: Context, value: Float) {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     prefs.edit().putFloat("max_distance", value).apply()
 }
 
-/**
- * Récupère la distance maximale enregistrée
- */
 fun getMaxDistance(context: Context): Float {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     return prefs.getFloat("max_distance", 30f)
 }
 
-/**
- * Écran principal affichant l'état de remplissage et les boutons de navigation
- */
 @Composable
 fun TrashStatusScreen(navController: NavController) {
     val context = LocalContext.current
@@ -49,7 +40,6 @@ fun TrashStatusScreen(navController: NavController) {
     val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
     var notificationSent by remember { mutableStateOf(false) }
 
-    // Connexion MQTT
     LaunchedEffect(Unit) {
         mqttClient.connectAndSubscribe("Distance") { message ->
             try {
@@ -62,7 +52,6 @@ fun TrashStatusScreen(navController: NavController) {
         }
     }
 
-    // Notification une fois si dépassement
     LaunchedEffect(fillPercentage) {
         if (fillPercentage >= 95 && !notificationSent) {
             showFullNotification(context)
@@ -73,7 +62,6 @@ fun TrashStatusScreen(navController: NavController) {
         }
     }
 
-    // Interface
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -115,7 +103,7 @@ fun TrashStatusScreen(navController: NavController) {
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            MenuButton("Bin Level", Modifier.weight(1f)) { /* déjà sur cet écran */ }
+            MenuButton("Bin Level", Modifier.weight(1f)) { navController.navigate("binLevel") }
             MenuButton("Bin State", Modifier.weight(1f)) { navController.navigate("binState") }
         }
 
@@ -129,9 +117,6 @@ fun TrashStatusScreen(navController: NavController) {
     }
 }
 
-/**
- * Bouton de navigation réutilisable
- */
 @Composable
 fun MenuButton(title: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
