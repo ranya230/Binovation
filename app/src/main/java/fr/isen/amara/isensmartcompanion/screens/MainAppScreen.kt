@@ -9,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.*
-import fr.isen.amara.isensmartcompanion.screens.*
 
 @Composable
 fun MainAppScreen() {
@@ -28,7 +27,7 @@ fun MainAppScreen() {
                                 "settings" -> Icon(Icons.Default.Settings, contentDescription = null)
                             }
                         },
-                        label = { Text(screen.capitalize()) },
+                        label = { Text(screen.replaceFirstChar { it.uppercaseChar() }) },
                         selected = navController.currentBackStackEntryAsState().value?.destination?.route == screen,
                         onClick = {
                             navController.navigate(screen) {
@@ -47,7 +46,8 @@ fun MainAppScreen() {
             startDestination = "home",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("home") { TrashStatusScreen() }
+            // ✅ Correction ici : on passe navController à TrashStatusScreen
+            composable("home") { TrashStatusScreen(navController) }
             composable("assistant") { AssistantScreen() }
             composable("settings") { SettingsScreen() }
         }

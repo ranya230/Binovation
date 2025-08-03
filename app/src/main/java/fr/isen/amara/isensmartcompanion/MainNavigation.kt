@@ -46,9 +46,12 @@ fun MainNavigation() {
             startDestination = "home",
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable("home") { TrashStatusScreen() }
+            composable("home") { TrashStatusScreen(navController) }
             composable("assistant") { AssistantScreen() }
             composable("settings") { SettingsScreen() }
+
+            // ✅ Ajout de la route "binState"
+            composable("binState") { BinStateScreen() }
         }
     }
 }
