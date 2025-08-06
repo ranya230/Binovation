@@ -13,16 +13,19 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import androidx.navigation.NavController
 import fr.isen.amara.isensmartcompanion.R
 
+// Fonction utilitaire : enregistrer la distance max
 fun saveMaxDistance(context: Context, value: Float) {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     prefs.edit().putFloat("max_distance", value).apply()
 }
 
+// Fonction utilitaire : récupérer la distance max
 fun getMaxDistance(context: Context): Float {
     val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     return prefs.getFloat("max_distance", 30f)
@@ -36,10 +39,12 @@ fun TrashStatusScreen(navController: NavController) {
 
     var distance by remember { mutableStateOf(30f) }
     var maxDistance by remember { mutableStateOf(getMaxDistance(context)) }
+    var scanStatus by remember { mutableStateOf("") }
 
     val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
     var notificationSent by remember { mutableStateOf(false) }
 
+    // Réception MQTT
     LaunchedEffect(Unit) {
         mqttClient.connectAndSubscribe("Distance") { message ->
             try {
@@ -52,6 +57,7 @@ fun TrashStatusScreen(navController: NavController) {
         }
     }
 
+    // Notification si la poubelle est presque pleine
     LaunchedEffect(fillPercentage) {
         if (fillPercentage >= 95 && !notificationSent) {
             showFullNotification(context)
@@ -62,6 +68,7 @@ fun TrashStatusScreen(navController: NavController) {
         }
     }
 
+    // UI
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,10 +95,14 @@ fun TrashStatusScreen(navController: NavController) {
             color = MaterialTheme.colorScheme.primary
         )
 
+        // ✅ Bouton pour lancer un scan MQTT
         Button(
             onClick = {
                 coroutineScope.launch(Dispatchers.IO) {
                     mqttClient.publish("smartbin/scan", "start")
+                    scanStatus = "Scan sent!"
+                    delay(3000)
+                    scanStatus = ""
                 }
             },
             modifier = Modifier.fillMaxWidth()
@@ -99,6 +110,16 @@ fun TrashStatusScreen(navController: NavController) {
             Text("Scan Now")
         }
 
+        // ✅ Message temporaire de confirmation
+        if (scanStatus.isNotEmpty()) {
+            Text(
+                text = scanStatus,
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 14.sp
+            )
+        }
+
+        // ✅ Boutons de navigation
         Row(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxWidth()
@@ -117,6 +138,7 @@ fun TrashStatusScreen(navController: NavController) {
     }
 }
 
+// Composable pour les boutons du menu
 @Composable
 fun MenuButton(title: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
