@@ -24,7 +24,9 @@ data class HistoryEntry(val percentage: Float, val timestamp: Long)
 @Composable
 fun HistoryScreen() {
     val context = LocalContext.current
-    val mqttClient = remember { MqttClientHelper() }
+    // ✅ même helper que les autres écrans
+    val mqtt = remember { MqttClientHelper(context) }
+
     val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
     val history = remember { mutableStateListOf<HistoryEntry>() }
 
@@ -35,17 +37,20 @@ fun HistoryScreen() {
         history.map { formatDateOnly(it.timestamp) }.distinct().sortedDescending()
     }
 
-    LaunchedEffect(Unit) {
-        mqttClient.connectAndSubscribe("Distance") { message ->
-            try {
-                val json = JSONObject(message)
-                val distance = json.getDouble("distance").toFloat()
-                val percentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
-                val timestamp = System.currentTimeMillis()
+    // ✅ connexion + abonnement + cleanup
+    DisposableEffect(Unit) {
+        mqtt.connect()
+        mqtt.subscribe("Distance") { message ->
+            val distance = parseDistance(message) ?: return@subscribe
+            val percentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
+            val timestamp = System.currentTimeMillis()
 
-                history.add(HistoryEntry(percentage, timestamp))
-                if (history.size > 100) history.removeAt(0)
-            } catch (_: Exception) {}
+            history.add(HistoryEntry(percentage, timestamp))
+            if (history.size > 100) history.removeAt(0)
+        }
+        onDispose {
+            mqtt.unsubscribe("Distance")
+            mqtt.disconnect()
         }
     }
 
@@ -53,13 +58,14 @@ fun HistoryScreen() {
         history.filter {
             val matchDate = selectedDate == "All" || formatDateOnly(it.timestamp) == selectedDate
             val matchFilter = when (selectedFilter) {
-                "Full" -> it.percentage >= 95f
+                "Full"  -> it.percentage >= 95f
                 "Empty" -> it.percentage == 0f
-                "Low" -> it.percentage < 50f
-                else -> true
+                "Low"   -> it.percentage < 50f
+                else    -> true
             }
             matchDate && matchFilter
-        }.sortedByDescending { it.timestamp }
+        }
+            .sortedByDescending { it.timestamp }
             .groupBy { formatDateOnly(it.timestamp) }
     }
 
@@ -68,7 +74,6 @@ fun HistoryScreen() {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // ✅ Titre principal en haut
         Text(
             text = "History",
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
@@ -86,16 +91,11 @@ fun HistoryScreen() {
         Spacer(modifier = Modifier.height(12.dp))
 
         if (filteredHistory.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No matching data.", fontSize = 16.sp, color = Color.Gray)
             }
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 filteredHistory.forEach { (date, entries) ->
                     item {
                         Text(
@@ -105,13 +105,41 @@ fun HistoryScreen() {
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
-                    items(entries) { entry ->
+                    items(entries, key = { it.timestamp }) { entry ->
                         HistoryCard(entry)
                     }
                 }
             }
         }
     }
+}
+
+/** Parse robuste du message MQTT :
+ *  - JSON: {"distance": 1234}
+ *  - brut: "1234"
+ *  - texte: "Distance: 1234 mm"
+ */
+private fun parseDistance(message: String): Float? {
+    // JSON
+    try {
+        val json = JSONObject(message)
+        if (json.has("distance")) {
+            // on évite getDouble/optDouble pour rester 100% compatible
+            val any = json.get("distance")
+            return when (any) {
+                is Number -> any.toFloat()
+                is String -> any.toFloatOrNull()
+                else -> null
+            }
+        }
+    } catch (_: Exception) { /* pas du JSON */ }
+
+    // Nombre brut
+    message.toFloatOrNull()?.let { return it }
+
+    // Texte libre -> premier nombre trouvé
+    val regex = Regex("""-?\d+(\.\d+)?""")
+    return regex.find(message)?.value?.toFloatOrNull()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -162,16 +190,11 @@ fun DropdownFilter(
             onValueChange = {},
             label = { Text(label) },
             modifier = Modifier.menuAnchor(),
-            trailingIcon = {
-                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             colors = ExposedDropdownMenuDefaults.textFieldColors()
         )
 
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(option) },

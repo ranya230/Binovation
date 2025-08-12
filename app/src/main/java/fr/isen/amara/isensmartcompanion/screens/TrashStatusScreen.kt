@@ -34,11 +34,13 @@ fun getMaxDistance(context: Context): Float {
 @Composable
 fun TrashStatusScreen(navController: NavController) {
     val context = LocalContext.current
-    val mqttClient = remember { MqttClientHelper() }
+    val mqttClient = remember { MqttClientHelper(context) }
     val coroutineScope = rememberCoroutineScope()
 
     var distance by remember { mutableStateOf(30f) }
-    var maxDistance by remember { mutableStateOf(getMaxDistance(context)) }
+//  var maxDistance by remember { mutableStateOf(getMaxDistance(context)) }
+    var maxDistance by remember { mutableStateOf(1200f) }
+
     var scanStatus by remember { mutableStateOf("") }
 
     val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)

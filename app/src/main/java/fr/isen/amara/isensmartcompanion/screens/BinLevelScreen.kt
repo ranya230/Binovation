@@ -1,6 +1,5 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import android.content.Context
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.*
@@ -15,37 +14,46 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import fr.isen.amara.isensmartcompanion.R
-import org.json.JSONObject
 import kotlin.math.roundToInt
+import org.json.JSONObject
 
 @Composable
 fun BinLevelScreen() {
     val context = LocalContext.current
-    val mqttClient = remember { MqttClientHelper() }
 
+    // 1) Un seul client MQTT pour cet écran (le helper attend un Context)
+    val mqtt = remember { MqttClientHelper(context) }
+
+    // 2) États UI
     var distance by remember { mutableStateOf(30f) }
     val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
     val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
 
-    // MQTT Reception
-    LaunchedEffect(Unit) {
-        mqttClient.connectAndSubscribe("Distance") { message ->
-            val json = JSONObject(message)
-            val newDistance = json.getDouble("distance").toFloat()
-            distance = newDistance
+    // 3) Connexion + abonnement au topic "Distance", puis nettoyage à la fermeture
+    DisposableEffect(Unit) {
+        mqtt.connect()
+        mqtt.subscribe("Distance") { payload ->
+            // Formats acceptés : {"distance":1234}, "1234", "Distance: 1234"
+            parseDistance(payload)?.let { newValue ->
+                distance = newValue
+            }
+        }
+        onDispose {
+            mqtt.unsubscribe("Distance")
+            mqtt.disconnect()
         }
     }
 
+    // 4) Couleur/texte d’état selon le pourcentage
     val statusColor = when {
-        fillPercentage >= 95f -> Color(0xFFC62828) // Red
-        fillPercentage >= 80f -> Color(0xFFFF8F00) // Orange
-        fillPercentage >= 50f -> Color(0xFFFFD600) // Yellow
-        else -> Color(0xFF43A047)                // Green
+        fillPercentage >= 95f -> Color(0xFFC62828)
+        fillPercentage >= 80f -> Color(0xFFFF8F00)
+        fillPercentage >= 50f -> Color(0xFFFFD600)
+        else -> Color(0xFF43A047)
     }
-
     val statusText = if (fillPercentage >= 95f) "The bin must be emptied." else ""
 
-    // UI Layout
+    // 5) UI
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -53,7 +61,6 @@ fun BinLevelScreen() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // ✅ Titre principal
         Text(
             text = "Bin Level",
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
@@ -73,7 +80,6 @@ fun BinLevelScreen() {
             color = MaterialTheme.colorScheme.primary
         )
 
-        // Pourcentage + couleur
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
@@ -83,9 +89,7 @@ fun BinLevelScreen() {
                 fontSize = 36.sp,
                 fontWeight = FontWeight.Bold
             )
-
             Spacer(modifier = Modifier.width(16.dp))
-
             Surface(
                 modifier = Modifier.size(32.dp),
                 color = statusColor,
@@ -93,7 +97,6 @@ fun BinLevelScreen() {
             ) {}
         }
 
-        // ProgressBar avec la couleur dynamique
         LinearProgressIndicator(
             progress = fillPercentage / 100f,
             modifier = Modifier
@@ -102,7 +105,6 @@ fun BinLevelScreen() {
             color = statusColor
         )
 
-        // Message d’alerte si nécessaire
         if (statusText.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -119,4 +121,20 @@ fun BinLevelScreen() {
             }
         }
     }
+}
+
+/** Parse robuste du message MQTT : JSON {"distance":1234}, brut "1234", texte "Distance: 1234 mm" */
+private fun parseDistance(message: String): Float? {
+    // JSON
+    try {
+        val json = JSONObject(message)
+        if (json.has("distance")) return json.getDouble("distance").toFloat()
+    } catch (_: Exception) { /* pas du JSON */ }
+
+    // Nombre brut
+    message.toFloatOrNull()?.let { return it }
+
+    // Texte libre → premier nombre
+    val regex = Regex("""-?\d+(\.\d+)?""")
+    return regex.find(message)?.value?.toFloatOrNull()
 }
