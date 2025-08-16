@@ -1,7 +1,6 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import android.annotation.SuppressLint
-import android.util.Log
+import android.app.Application
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,172 +18,174 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
 
-data class HistoryEntry(val percentage: Float, val timestamp: Long)
-
 @Composable
 fun HistoryScreen() {
-    val context = LocalContext.current
-    val mqtt = remember { MqttClientHelper(context) }
+    val app = LocalContext.current.applicationContext as Application
+    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    )
+    LaunchedEffect(Unit) { vm.start() }
 
-    // ⚠️ mets une valeur réaliste pour tes tests Python (ex: 1200 mm)
-    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 1200f
+    val ui by vm.ui.collectAsState()
+    val fullHistory = ui.history
 
-    val history = remember { mutableStateListOf<HistoryEntry>() }
-    var lastRaw by remember { mutableStateOf<String?>(null) }   // DEBUG: dernier payload
-    var count by remember { mutableStateOf(0) }                  // DEBUG: nb messages reçus
+    // ===== Filtres =====
+    var window by remember { mutableStateOf(TimeWindow.ALL) }
+    var level by remember { mutableStateOf(LevelFilter.ALL) }
+    var selectedDate by remember { mutableStateOf<String?>(null) } // si != null, on affiche uniquement cette date
 
-    var selectedDate by remember { mutableStateOf("All") }
-    var selectedFilter by remember { mutableStateOf("All") }
-
-    val availableDates = remember(history) {
-        history.map { formatDateOnly(it.timestamp) }.distinct().sortedDescending()
+    // Liste des dates disponibles (yyyy-MM-dd)
+    val availableDates = remember(fullHistory) {
+        fullHistory.map { formatDateOnly(it.ts) }.distinct().sortedDescending()
     }
 
-    DisposableEffect(Unit) {
-        mqtt.connectAndSubscribe("Distance") { message ->
-            // DEBUG
-            Log.d("HISTORY", "MQTT payload: $message")
-            lastRaw = message
-            count++
-
-            val distance = parseDistance(message) ?: return@connectAndSubscribe
-            val percentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
-            val timestamp = System.currentTimeMillis()
-
-            history.add(HistoryEntry(percentage, timestamp))
-            if (history.size > 200) history.removeAt(0)
-        }
-        onDispose {
-            mqtt.unsubscribe("Distance")
-            mqtt.disconnect()
-        }
+    // ===== Application des filtres =====
+    val now = System.currentTimeMillis()
+    val fromTs = when (window) {
+        TimeWindow.H1  -> now - 1L * 60 * 60 * 1000
+        TimeWindow.H6  -> now - 6L * 60 * 60 * 1000
+        TimeWindow.H24 -> now - 24L * 60 * 60 * 1000
+        TimeWindow.ALL -> Long.MIN_VALUE
     }
 
-    val filteredHistory = remember(history, selectedDate, selectedFilter) {
-        history.filter {
-            val matchDate = selectedDate == "All" || formatDateOnly(it.timestamp) == selectedDate
-            val matchFilter = when (selectedFilter) {
-                "Full"  -> it.percentage >= 95f
-                "Empty" -> it.percentage == 0f
-                "Low"   -> it.percentage < 50f
-                else    -> true
+    val baseFiltered = remember(fullHistory, window, selectedDate) {
+        fullHistory
+            .asSequence()
+            .filter { it.ts >= fromTs }
+            .filter { sel ->
+                selectedDate?.let { formatDateOnly(sel.ts) == it } ?: true
             }
-            matchDate && matchFilter
-        }.sortedByDescending { it.timestamp }
-            .groupBy { formatDateOnly(it.timestamp) }
+            .toList()
+    }
+
+    val filtered = remember(baseFiltered, level) {
+        baseFiltered.filter { hp ->
+            when (level) {
+                LevelFilter.ALL     -> true
+                LevelFilter.LOW     -> hp.percent < 50f
+                LevelFilter.MEDIUM  -> hp.percent in 50f..79.999f
+                LevelFilter.HIGH    -> hp.percent in 80f..94.999f
+                LevelFilter.FULL    -> hp.percent >= 95f
+                LevelFilter.EMPTIES -> hp.percent == 0f
+            }
+        }
+    }
+
+    // ===== Stats rapides sur l’échantillon filtré =====
+    val minVal = filtered.minOfOrNull { it.percent }?.roundToInt()
+    val maxVal = filtered.maxOfOrNull { it.percent }?.roundToInt()
+    val avgVal = filtered.takeIf { it.isNotEmpty() }?.map { it.percent }?.average()?.let { String.format(Locale.getDefault(), "%.1f", it) }
+
+    // ===== Groupement par date =====
+    val grouped = remember(filtered) {
+        filtered.sortedByDescending { it.ts }.groupBy { formatDateOnly(it.ts) }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "History",
-            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
+        // Header
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("History", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+            Text(if (ui.scanning) "Listening..." else "Idle", fontSize = 12.sp, color = Color.Gray)
+        }
 
-        // DEBUG (visible écran): pour vérifier que ça écoute
-        Text("Messages reçus: $count", fontSize = 12.sp, color = Color.Gray)
-        lastRaw?.let { Text("Dernier payload: $it", fontSize = 12.sp, color = Color.Gray) }
-
-        Spacer(Modifier.height(12.dp))
-
-        FilterRow(
-            selectedDate = selectedDate,
+        // Filtres
+        FilterBar(
+            window = window,
+            onWindowChange = { window = it; selectedDate = null }, // si on change de fenêtre, on libère la date spécifique
+            level = level,
+            onLevelChange = { level = it },
+            date = selectedDate,
             onDateChange = { selectedDate = it },
-            dateOptions = listOf("All") + availableDates,
-            selectedType = selectedFilter,
-            onTypeChange = { selectedFilter = it }
+            availableDates = availableDates
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        // Stats rapides
+        StatsCard(minVal = minVal, maxVal = maxVal, avgVal = avgVal, count = filtered.size)
 
-        if (filteredHistory.isEmpty()) {
+        // Liste groupée
+        if (filtered.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No matching data.", fontSize = 16.sp, color = Color.Gray)
             }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                filteredHistory.forEach { (date, entries) ->
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                grouped.forEach { (date, items) ->
                     item {
                         Text(
-                            text = "📅 $date",
+                            text = date,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                         )
+                        Divider()
                     }
-                    items(entries, key = { it.timestamp }) { entry ->
-                        HistoryCard(entry)
+                    items(items, key = { it.ts }) { hp ->
+                        HistoryRow(hp)
                     }
                 }
+                item { Spacer(Modifier.height(8.dp)) }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/* ==================== UI Blocks ==================== */
+
 @Composable
-fun FilterRow(
-    selectedDate: String,
-    onDateChange: (String) -> Unit,
-    dateOptions: List<String>,
-    selectedType: String,
-    onTypeChange: (String) -> Unit
+private fun FilterBar(
+    window: TimeWindow,
+    onWindowChange: (TimeWindow) -> Unit,
+    level: LevelFilter,
+    onLevelChange: (LevelFilter) -> Unit,
+    date: String?,
+    onDateChange: (String?) -> Unit,
+    availableDates: List<String>
 ) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        DropdownFilter(
-            label = "Date",
-            selected = selectedDate,
-            options = dateOptions,
-            onSelect = onDateChange
-        )
-        DropdownFilter(
-            label = "Filter",
-            selected = selectedType,
-            options = listOf("All", "Full", "Empty", "Low"),
-            onSelect = onTypeChange
-        )
-    }
-}
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Fenêtre temporelle
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TimeWindow.values().forEach { w ->
+                FilterChip(
+                    selected = window == w,
+                    onClick = { onWindowChange(w) },
+                    label = { Text(w.label) }
+                )
+            }
+        }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun DropdownFilter(
-    label: String,
-    selected: String,
-    options: List<String>,
-    onSelect: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
+        // Niveau
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LevelFilter.values().forEach { lf ->
+                FilterChip(
+                    selected = level == lf,
+                    onClick = { onLevelChange(lf) },
+                    label = { Text(lf.label) }
+                )
+            }
+        }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded }
-    ) {
-        TextField(
-            readOnly = true,
-            value = selected,
-            onValueChange = {},
-            label = { Text(label) },
-            modifier = Modifier.menuAnchor(),
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            colors = ExposedDropdownMenuDefaults.textFieldColors()
-        )
-
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    onClick = {
-                        onSelect(option)
-                        expanded = false
-                    }
+        // Date précise (optionnelle)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AssistChip(
+                onClick = { onDateChange(null) },
+                label = { Text("All dates") },
+                leadingIcon = {},
+                enabled = date != null
+            )
+            availableDates.take(7).forEach { d -> // on affiche les 7 dernières dates pour rester compact
+                FilterChip(
+                    selected = date == d,
+                    onClick = { onDateChange(d) },
+                    label = { Text(d) }
                 )
             }
         }
@@ -192,37 +193,83 @@ fun DropdownFilter(
 }
 
 @Composable
-fun HistoryCard(entry: HistoryEntry) {
-    val fill = entry.percentage.roundToInt()
-    val time = formatHourMinute(entry.timestamp)
-
-    val (bgColor, label, textColor) = when {
-        fill >= 95 -> Triple(Color(0xFFFFEBEE), "Bin full: $fill%", Color(0xFFC62828))
-        fill == 0 -> Triple(Color(0xFFC8E6C9), "Bin emptied: 0%", Color(0xFF2E7D32))
-        else -> Triple(Color(0xFFF1F0FC), "Update: $fill%", MaterialTheme.colorScheme.onSurface)
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = bgColor)
+private fun StatsCard(
+    minVal: Int?,
+    maxVal: Int?,
+    avgVal: String?,
+    count: Int
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(label, fontSize = 16.sp, color = textColor)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Time: $time", fontSize = 13.sp)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Summary", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Count"); Text("$count", fontWeight = FontWeight.Medium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Min"); Text(minVal?.let { "$it%" } ?: "—", fontWeight = FontWeight.Medium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Max"); Text(maxVal?.let { "$it%" } ?: "—", fontWeight = FontWeight.Medium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Average"); Text(avgVal?.let { "$it%" } ?: "—", fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
 
-@SuppressLint("SimpleDateFormat")
-fun formatDateOnly(millis: Long): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd")
+@Composable
+private fun HistoryRow(hp: HistoryPoint) {
+    val p = hp.percent
+    val (bg, txt) = when {
+        p >= 95f -> Color(0xFFFFEBEE) to Color(0xFFC62828) // full
+        p >= 80f -> Color(0xFFFFF3E0) to Color(0xFFEF6C00) // high
+        p >= 50f -> Color(0xFFFFFDE7) to Color(0xFFFBC02D) // medium
+        else     -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = bg)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(String.format(Locale.getDefault(), "%.1f%%", p), fontWeight = FontWeight.Medium, color = txt)
+            Text(formatHourMinute(hp.ts), fontSize = 12.sp, color = Color.Gray)
+        }
+    }
+}
+
+/* ==================== Types & Helpers ==================== */
+
+private enum class TimeWindow(val label: String) {
+    H1("1h"), H6("6h"), H24("24h"), ALL("All")
+}
+
+private enum class LevelFilter(val label: String) {
+    ALL("All"),
+    LOW("Low"),
+    MEDIUM("Medium"),
+    HIGH("High"),
+    FULL("Full"),
+    EMPTIES("Empties")
+}
+
+private fun formatDateOnly(millis: Long): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     return sdf.format(Date(millis))
 }
 
-@SuppressLint("SimpleDateFormat")
-fun formatHourMinute(millis: Long): String {
-    val sdf = SimpleDateFormat("HH:mm")
+private fun formatHourMinute(millis: Long): String {
+    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
     return sdf.format(Date(millis))
 }
