@@ -62,33 +62,90 @@ fun TrashStatusScreen(navController: NavController) {
     val mqttClient = remember { MqttClientHelper(context) }
     val scope = rememberCoroutineScope()
 
-    var distance by remember { mutableStateOf(30f) }
-    var maxDistance by remember { mutableStateOf(getMaxDistance(context)) }
+    // Paramètres
+    val inactivityMs = 12_000L // revenir à 0% si aucune donnée pendant 12 s
+    val maxDistancePref = remember { getMaxDistance(context) }
+
+    // Etat "pas de donnée encore" -> on force 0% tant qu'aucune lecture valide
+    var hasReading by remember { mutableStateOf(false) }
+
+    // Distance courante; on initialise à maxDistance pour que le calcul donne 0 %
+    var distance by remember { mutableStateOf(maxDistancePref) }
+
+    // On garde maxDistance séparé si tu le changes un jour dans Settings
+    var maxDistance by remember { mutableStateOf(maxDistancePref) }
+
     var scanStatus by remember { mutableStateOf("") }
     var notificationSent by remember { mutableStateOf(false) }
+    var lastMsgTs by remember { mutableStateOf(0L) }
 
-    val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
+    // Pour ignorer un éventuel message "retained" au 1er abonnement
+    var firstMessageIgnored by remember { mutableStateOf(false) }
+
+    val fillPercentage = if (hasReading) {
+        ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
+    } else {
+        0f
+    }
 
     /* Connexion / abonnement MQTT + cleanup */
     DisposableEffect(Unit) {
-        mqttClient.connectAndSubscribe("Distance") { payload ->
-            parseDistanceSafe(payload)?.let { newDist ->
+        // 1) Connexion
+        mqttClient.connect(onConnected = {
+            // 2) Tentative de purge du message retenu sur le topic Distance
+            //    -> publier payload vide en retained pour effacer côté broker
+            mqttClient.publish(topic = "Distance", payload = "", qos = 1, retained = true)
+
+            // 3) Abonnement
+            mqttClient.subscribe(topic = "Distance", qos = 1) { payload ->
+                val newDist = parseDistanceSafe(payload) ?: return@subscribe
+
+                // bornes simples (0 .. 1.2*max)
+                if (newDist < 0f || newDist > maxDistance * 1.2f) return@subscribe
+
+                // ignorer le tout premier message après abonnement (souvent retained)
+                if (!firstMessageIgnored) {
+                    firstMessageIgnored = true
+                    return@subscribe
+                }
+
                 distance = newDist
+                hasReading = true
+                lastMsgTs = System.currentTimeMillis()
             }
-        }
+        })
+
         onDispose {
             mqttClient.unsubscribe("Distance")
             mqttClient.disconnect()
+            // reset visuel quand on quitte l'écran
+            hasReading = false
+            distance = maxDistance
         }
     }
 
-    /* Notification si presque plein */
-    LaunchedEffect(fillPercentage) {
-        if (fillPercentage >= 95 && !notificationSent) {
+    /* Retour auto à 0% après inactivité */
+    LaunchedEffect(lastMsgTs, hasReading, maxDistance) {
+        if (hasReading) {
+            delay(inactivityMs)
+            val now = System.currentTimeMillis()
+            if (now - lastMsgTs >= inactivityMs) {
+                hasReading = false
+                distance = maxDistance // 0%
+                firstMessageIgnored = false // prêt pour prochaine session
+            }
+        }
+    }
+
+    /* Notification si presque plein (uniquement si on a des vraies données) */
+    LaunchedEffect(fillPercentage, hasReading) {
+        if (hasReading && fillPercentage >= 95 && !notificationSent) {
             showFullNotification(context)
             notificationSent = true
         }
-        if (fillPercentage < 90) notificationSent = false
+        if (fillPercentage < 90) {
+            notificationSent = false
+        }
     }
 
     /* UI */
@@ -151,6 +208,13 @@ fun TrashStatusScreen(navController: NavController) {
                         else -> Color(0xFF43A047)
                     }
                 )
+
+                // Indication d'état pour compréhension
+                val status = when {
+                    !hasReading -> "Waiting for data..."
+                    else -> "Live"
+                }
+                Text(status, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -158,9 +222,13 @@ fun TrashStatusScreen(navController: NavController) {
         Button(
             onClick = {
                 scope.launch(Dispatchers.IO) {
+                    // on réinitialise l'état avant une nouvelle session
+                    hasReading = false
+                    distance = maxDistance
+                    firstMessageIgnored = false
                     mqttClient.publish("smartbin/scan", "start")
                     scanStatus = "Scan sent!"
-                    delay(3000)
+                    delay(2500)
                     scanStatus = ""
                 }
             },
