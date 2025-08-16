@@ -3,6 +3,7 @@ package fr.isen.amara.isensmartcompanion.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -17,11 +18,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.ai.client.generativeai.GenerativeModel
+import fr.isen.amara.isensmartcompanion.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,12 +64,33 @@ fun AssistantScreen() {
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF333333)
                 )
+
+                // 👇 Ajout logos ISEN et Binovation sous le titre
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.isen),
+                        contentDescription = "ISEN logo",
+                        modifier = Modifier.size(70.dp)
+                    )
+                    Image(
+                        painter = painterResource(id = R.drawable.binovation_logo),
+                        contentDescription = "Binovation logo",
+                        modifier = Modifier.size(70.dp)
+                    )
+                }
+
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "Assistant AI – " + "Ask anything about waste management",
+                        "Assistant AI – Ask anything about waste management",
                         fontSize = 14.sp,
                         color = Color.Gray
                     )
