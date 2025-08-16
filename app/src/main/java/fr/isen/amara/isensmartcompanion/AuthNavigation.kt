@@ -35,6 +35,7 @@ fun AuthNavigation(navController: NavHostController) {
                 onNavigateBackToLogin = { navController.navigate("login") }
             )
         }
+        // Écran principal après login
         composable("main") {
             MainNavigation()
         }

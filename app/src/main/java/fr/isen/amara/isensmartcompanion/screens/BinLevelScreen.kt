@@ -1,13 +1,13 @@
 package fr.isen.amara.isensmartcompanion.screens
 
-import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.*
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -15,45 +15,29 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import fr.isen.amara.isensmartcompanion.R
 import kotlin.math.roundToInt
-import org.json.JSONObject
 
 @Composable
 fun BinLevelScreen() {
-    val context = LocalContext.current
+    val app = LocalContext.current.applicationContext as android.app.Application
+    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    )
 
-    // 1) Un seul client MQTT pour cet écran (le helper attend un Context)
-    val mqtt = remember { MqttClientHelper(context) }
+    LaunchedEffect(Unit) { vm.start() }
 
-    // 2) États UI
-    var distance by remember { mutableStateOf(30f) }
-    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
-    val fillPercentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
+    val ui by vm.ui.collectAsState()
+    val percent = ui.percent ?: 0f
 
-    // 3) Connexion + abonnement au topic "Distance", puis nettoyage à la fermeture
-    DisposableEffect(Unit) {
-        mqtt.connect()
-        mqtt.subscribe("Distance") { payload ->
-            // Formats acceptés : {"distance":1234}, "1234", "Distance: 1234"
-            parseDistance(payload)?.let { newValue ->
-                distance = newValue
-            }
-        }
-        onDispose {
-            mqtt.unsubscribe("Distance")
-            mqtt.disconnect()
-        }
-    }
-
-    // 4) Couleur/texte d’état selon le pourcentage
+    // ✅ Couleur/texte d’état selon le pourcentage
     val statusColor = when {
-        fillPercentage >= 95f -> Color(0xFFC62828)
-        fillPercentage >= 80f -> Color(0xFFFF8F00)
-        fillPercentage >= 50f -> Color(0xFFFFD600)
-        else -> Color(0xFF43A047)
+        percent >= 95f -> Color(0xFFC62828) // Rouge
+        percent >= 80f -> Color(0xFFFF8F00) // Orange
+        percent >= 50f -> Color(0xFFFFD600) // Jaune
+        else -> Color(0xFF43A047)          // Vert
     }
-    val statusText = if (fillPercentage >= 95f) "The bin must be emptied." else ""
+    val statusText = if (percent >= 95f) "The bin must be emptied." else ""
 
-    // 5) UI
+    // ✅ UI
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -85,7 +69,7 @@ fun BinLevelScreen() {
             horizontalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "${fillPercentage.roundToInt()}%",
+                text = "${percent.roundToInt()}%",
                 fontSize = 36.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -98,7 +82,7 @@ fun BinLevelScreen() {
         }
 
         LinearProgressIndicator(
-            progress = fillPercentage / 100f,
+            progress = percent / 100f,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(8.dp),
@@ -121,20 +105,4 @@ fun BinLevelScreen() {
             }
         }
     }
-}
-
-/** Parse robuste du message MQTT : JSON {"distance":1234}, brut "1234", texte "Distance: 1234 mm" */
-private fun parseDistance(message: String): Float? {
-    // JSON
-    try {
-        val json = JSONObject(message)
-        if (json.has("distance")) return json.getDouble("distance").toFloat()
-    } catch (_: Exception) { /* pas du JSON */ }
-
-    // Nombre brut
-    message.toFloatOrNull()?.let { return it }
-
-    // Texte libre → premier nombre
-    val regex = Regex("""-?\d+(\.\d+)?""")
-    return regex.find(message)?.value?.toFloatOrNull()
 }

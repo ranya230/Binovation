@@ -1,7 +1,12 @@
 package fr.isen.amara.isensmartcompanion.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,139 +18,215 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.roundToInt
+import kotlin.math.ceil
 
 @Composable
 fun AnalysisScreen() {
-    val context = LocalContext.current
+    val app = LocalContext.current.applicationContext as android.app.Application
+    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    )
 
-    // 1) Un seul client MQTT pour cet écran
-    val mqtt = remember { MqttClientHelper(context) }
+    LaunchedEffect(Unit) { vm.start() }
 
-    // 2) États
-    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
-    val history = remember { mutableStateListOf<Pair<Float, Long>>() }
-    var lastUpdateTime by remember { mutableStateOf<Long?>(null) }
+    val ui by vm.ui.collectAsState()
+    val history = ui.history
 
-    // Optionnel: pour limiter à 1 point / 20s max (si tes messages arrivent plus souvent)
-    var lastAcceptedTs by remember { mutableStateOf(0L) }
-    val periodMs = 20_000L  // 20 secondes
+    val lastUpdateStr = ui.lastUpdate?.let { formatDateTime(it) } ?: "—"
 
-    // 3) Connexion + abonnement, puis cleanup
-    DisposableEffect(Unit) {
-        mqtt.connect()
-        mqtt.subscribe("Distance") { payload ->
-            val dist = parseDistance(payload) ?: return@subscribe
-            val now = System.currentTimeMillis()
+    // ==== Calculs ====
+    val delta24h = remember(history.size) { deltaLastHours(24, history) }
+    val slope10minPerMin = remember(history.size) { slopeLastMinutes(10, history) }
+    val slope10minPerHour = slope10minPerMin?.let { it * 60f }
 
-            // (Optionnel) N’enregistrer qu’un point toutes les 20s
-            if (now - lastAcceptedTs < periodMs) return@subscribe
-            lastAcceptedTs = now
-
-            val percent = ((maxDistance - dist) / maxDistance * 100f).coerceIn(0f, 100f)
-            history.add(percent to now)
-            if (history.size > 200) history.removeAt(0) // petit tampon
-            lastUpdateTime = now
-        }
-        onDispose {
-            mqtt.unsubscribe("Distance")
-            mqtt.disconnect()
-        }
-    }
-
-    // 4) Petites analyses
-    val now = System.currentTimeMillis()
-    val oneHourMs = 60 * 60 * 1000
-
-    val usagePattern = remember(history) {
-        val lastDay = history.filter { now - it.second <= 24 * oneHourMs }
-        val mostUsedHour = lastDay
-            .groupBy { Calendar.getInstance().apply { timeInMillis = it.second }.get(Calendar.HOUR_OF_DAY) }
-            .maxByOrNull { it.value.size }?.key
-
-        val averageDeltaSec = if (lastDay.size >= 2) {
-            val deltas = lastDay.zipWithNext { a, b -> b.second - a.second }
-            (deltas.map { it / 1000 }.average()).toInt()
-        } else null
-
-        mostUsedHour to averageDeltaSec
-    }
-
-    val fillPercentage = history.lastOrNull()?.first?.roundToInt() ?: 0
-    val estFullTime: String? = if (history.size >= 3) {
-        val delta = history.last().first - history.first().first
-        val timeElapsedSec = (history.last().second - history.first().second) / 1000
-        if (delta > 5f && timeElapsedSec > 0) {
-            val ratePerSecond = delta / timeElapsedSec
-            val remaining = 100f - history.last().first
-            if (ratePerSecond > 0f) {
-                val secondsToFull = (remaining / ratePerSecond).toLong()
-                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now + secondsToFull * 1000))
-            } else null
-        } else null
-    } else null
-
-    // 5) UI
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Smart Bin Analysis", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        // === HEADER ===
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Analysis", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(if (ui.scanning) "Scanning..." else "Idle", fontSize = 12.sp, color = Color.Gray)
+        }
 
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+        // === NIVEAU ACTUEL ===
+        ElevatedCard(
+            shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Current Fill Level: $fillPercentage%", fontSize = 18.sp)
-                estFullTime?.let {
-                    Text("Estimated full at: $it", fontSize = 14.sp, color = Color.Gray)
+            Column(
+                Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Current Fill Level", fontWeight = FontWeight.Medium)
+
+                LinearProgressIndicator(
+                    progress = { (ui.percent ?: 0f) / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(12.dp),
+                    color = levelColor(ui.percent ?: 0f),
+                    trackColor = Color.LightGray
+                )
+
+                Text(
+                    ui.percent?.let { String.format("%.1f%%", it) } ?: "—",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Text("Last update: $lastUpdateStr", fontSize = 12.sp, color = Color.Gray)
+            }
+        }
+
+        // === SYNTHÈSE ===
+        ElevatedCard(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Summary", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+
+                // Δ 24h
+                val deltaTxt = delta24h?.let { String.format(Locale.getDefault(), "%+.1f %%", it) } ?: "—"
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Δ last 24h")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (delta24h != null) {
+                            Icon(
+                                if (delta24h >= 0) Icons.Filled.ArrowDropUp else Icons.Filled.ArrowDropDown,
+                                contentDescription = null,
+                                tint = if (delta24h >= 0) Color(0xFF2E7D32) else Color(0xFFC62828)
+                            )
+                        }
+                        Text(deltaTxt, fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                // Taux moyen
+                val rateTxt = slope10minPerHour?.let { String.format("%.2f %%/h", it) } ?: "—"
+                KeyValueRow("Avg rate (10 min)", rateTxt)
+            }
+        }
+
+        // === LECTURES ===
+        ElevatedCard(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Text(
+                    "All readings",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(16.dp)
+                )
+                Divider()
+
+                if (history.isEmpty()) {
+                    Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) { Text("No data yet.") }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(history.asReversed()) { p ->
+                            ReadingRow(p)
+                        }
+                    }
                 }
             }
         }
-
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF78E6FF)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Usage Pattern", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                usagePattern.first?.let { Text("Most active hour: ${it}h") }
-                usagePattern.second?.let { Text("Avg. interval between updates: ${it} sec") }
-            }
-        }
-
-        lastUpdateTime?.let { ts ->
-            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            Text("Last update: ${sdf.format(Date(ts))}", fontSize = 13.sp, color = Color.Gray)
-        }
     }
 }
 
-/** Parse robuste du message MQTT : JSON {"distance": 1234}, nombre brut "1234", ou texte libre "Distance: 1234 mm" */
-private fun parseDistance(message: String): Float? {
-    // JSON
-    try {
-        val json = org.json.JSONObject(message)
-        if (json.has("distance")) {
-            val any = json.get("distance")
-            return when (any) {
-                is Number -> any.toFloat()
-                is String -> any.toFloatOrNull()
-                else -> null
-            }
-        }
-    } catch (_: Exception) { /* pas du JSON */ }
+/* ===== UI Components ===== */
 
-    // Nombre brut
-    message.toFloatOrNull()?.let { return it }
-
-    // Texte libre -> premier nombre
-    val regex = Regex("""-?\d+(\.\d+)?""")
-    return regex.find(message)?.value?.toFloatOrNull()
+@Composable
+private fun KeyValueRow(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label)
+        Text(value, fontWeight = FontWeight.Medium)
+    }
 }
+
+@Composable
+private fun ReadingRow(p: HistoryPoint) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(String.format(Locale.getDefault(), "%.1f%%", p.percent), fontWeight = FontWeight.Medium)
+        Text(formatTime(p.ts), fontSize = 12.sp, color = Color.Gray)
+    }
+}
+
+@Composable
+private fun levelColor(percent: Float): Color =
+    when {
+        percent < 30f -> Color(0xFF2E7D32) // vert
+        percent < 70f -> Color(0xFFFFA000) // orange
+        else -> Color(0xFFC62828)          // rouge
+    }
+
+/* ===== Helpers ===== */
+
+private fun deltaLastHours(hours: Int, hist: List<HistoryPoint>): Float? {
+    if (hist.size < 2) return null
+    val now = System.currentTimeMillis()
+    val from = now - hours * 3_600_000L
+    val window = hist.filter { it.ts >= from }
+    if (window.size < 2) return null
+    return window.last().percent - window.first().percent
+}
+
+private fun slopeLastMinutes(minutes: Int, hist: List<HistoryPoint>): Float? {
+    if (hist.size < 2) return null
+    val now = System.currentTimeMillis()
+    val fromTs = now - minutes * 60_000L
+    val window = hist.filter { it.ts >= fromTs }
+    if (window.size < 2) return null
+
+    val t0 = window.first().ts
+    var sumX = 0.0
+    var sumY = 0.0
+    var sumXX = 0.0
+    var sumXY = 0.0
+    val n = window.size.toDouble()
+
+    window.forEach { p ->
+        val x = (p.ts - t0).toDouble() / 60_000.0
+        val y = p.percent.toDouble()
+        sumX += x; sumY += y; sumXX += x * x; sumXY += x * y
+    }
+    val denom = n * sumXX - sumX * sumX
+    if (denom == 0.0) return null
+    return ((n * sumXY - sumX * sumY) / denom).toFloat()
+}
+
+private fun formatDateTime(millis: Long) =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(millis))
+
+private fun formatTime(millis: Long) =
+    SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(millis))

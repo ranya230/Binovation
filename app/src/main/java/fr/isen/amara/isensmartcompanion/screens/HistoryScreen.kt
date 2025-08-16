@@ -1,6 +1,7 @@
 package fr.isen.amara.isensmartcompanion.screens
 
 import android.annotation.SuppressLint
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,7 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -24,11 +24,14 @@ data class HistoryEntry(val percentage: Float, val timestamp: Long)
 @Composable
 fun HistoryScreen() {
     val context = LocalContext.current
-    // ✅ même helper que les autres écrans
     val mqtt = remember { MqttClientHelper(context) }
 
-    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 30f
+    // ⚠️ mets une valeur réaliste pour tes tests Python (ex: 1200 mm)
+    val maxDistance = getMaxDistance(context).takeIf { it > 0 } ?: 1200f
+
     val history = remember { mutableStateListOf<HistoryEntry>() }
+    var lastRaw by remember { mutableStateOf<String?>(null) }   // DEBUG: dernier payload
+    var count by remember { mutableStateOf(0) }                  // DEBUG: nb messages reçus
 
     var selectedDate by remember { mutableStateOf("All") }
     var selectedFilter by remember { mutableStateOf("All") }
@@ -37,16 +40,19 @@ fun HistoryScreen() {
         history.map { formatDateOnly(it.timestamp) }.distinct().sortedDescending()
     }
 
-    // ✅ connexion + abonnement + cleanup
     DisposableEffect(Unit) {
-        mqtt.connect()
-        mqtt.subscribe("Distance") { message ->
-            val distance = parseDistance(message) ?: return@subscribe
+        mqtt.connectAndSubscribe("Distance") { message ->
+            // DEBUG
+            Log.d("HISTORY", "MQTT payload: $message")
+            lastRaw = message
+            count++
+
+            val distance = parseDistance(message) ?: return@connectAndSubscribe
             val percentage = ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
             val timestamp = System.currentTimeMillis()
 
             history.add(HistoryEntry(percentage, timestamp))
-            if (history.size > 100) history.removeAt(0)
+            if (history.size > 200) history.removeAt(0)
         }
         onDispose {
             mqtt.unsubscribe("Distance")
@@ -64,8 +70,7 @@ fun HistoryScreen() {
                 else    -> true
             }
             matchDate && matchFilter
-        }
-            .sortedByDescending { it.timestamp }
+        }.sortedByDescending { it.timestamp }
             .groupBy { formatDateOnly(it.timestamp) }
     }
 
@@ -77,8 +82,14 @@ fun HistoryScreen() {
         Text(
             text = "History",
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 4.dp)
         )
+
+        // DEBUG (visible écran): pour vérifier que ça écoute
+        Text("Messages reçus: $count", fontSize = 12.sp, color = Color.Gray)
+        lastRaw?.let { Text("Dernier payload: $it", fontSize = 12.sp, color = Color.Gray) }
+
+        Spacer(Modifier.height(12.dp))
 
         FilterRow(
             selectedDate = selectedDate,
@@ -112,34 +123,6 @@ fun HistoryScreen() {
             }
         }
     }
-}
-
-/** Parse robuste du message MQTT :
- *  - JSON: {"distance": 1234}
- *  - brut: "1234"
- *  - texte: "Distance: 1234 mm"
- */
-private fun parseDistance(message: String): Float? {
-    // JSON
-    try {
-        val json = JSONObject(message)
-        if (json.has("distance")) {
-            // on évite getDouble/optDouble pour rester 100% compatible
-            val any = json.get("distance")
-            return when (any) {
-                is Number -> any.toFloat()
-                is String -> any.toFloatOrNull()
-                else -> null
-            }
-        }
-    } catch (_: Exception) { /* pas du JSON */ }
-
-    // Nombre brut
-    message.toFloatOrNull()?.let { return it }
-
-    // Texte libre -> premier nombre trouvé
-    val regex = Regex("""-?\d+(\.\d+)?""")
-    return regex.find(message)?.value?.toFloatOrNull()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
