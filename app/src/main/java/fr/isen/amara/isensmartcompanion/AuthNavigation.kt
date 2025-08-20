@@ -1,41 +1,60 @@
 package fr.isen.amara.isensmartcompanion
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.navigation.NavHostController
+import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import fr.isen.amara.isensmartcompanion.screens.*
+import androidx.navigation.compose.rememberNavController
+import fr.isen.amara.isensmartcompanion.screens.LoginScreen
+import fr.isen.amara.isensmartcompanion.screens.RegisterScreen
+import fr.isen.amara.isensmartcompanion.screens.ResetPasswordScreen
 
 @Composable
-fun AuthNavigation(navController: NavHostController) {
-    NavHost(navController, startDestination = "login") {
+fun AuthNavHost() {
+    val nav = rememberNavController()
+
+    NavHost(
+        navController = nav,
+        startDestination = "login",
+        modifier = Modifier.fillMaxSize()
+    ) {
         composable("login") {
             LoginScreen(
                 onLoginSuccess = {
-                    navController.navigate("main") {
+                    // Après connexion, aller vers l'app principale et retirer "login" de la back stack
+                    nav.navigate("main") {
                         popUpTo("login") { inclusive = true }
+                        launchSingleTop = true
                     }
                 },
-                onNavigateToRegister = { navController.navigate("register") },
-                onNavigateToResetPassword = { navController.navigate("reset") }
+                onNavigateToRegister = { nav.navigate("register") },
+                onNavigateToResetPassword = { nav.navigate("reset") }
             )
         }
+
         composable("register") {
             RegisterScreen(
                 onRegisterSuccess = {
-                    navController.navigate("login") {
-                        popUpTo("register") { inclusive = true }
-                    }
+                    // Une fois inscrit, revenir sur l'écran de login
+                    nav.popBackStack(route = "login", inclusive = false)
                 },
-                onNavigateToLogin = { navController.navigate("login") }
+                onNavigateToLogin = {
+                    // Retour simple vers login
+                    nav.popBackStack()
+                }
             )
         }
+
         composable("reset") {
             ResetPasswordScreen(
-                onNavigateBackToLogin = { navController.navigate("login") }
+                onNavigateBackToLogin = {
+                    nav.popBackStack()
+                }
             )
         }
-        // Écran principal après login
+
+        // Route vers ton app principale
         composable("main") {
             MainNavigation()
         }

@@ -24,48 +24,42 @@ class BinSharedViewModel(app: Application) : AndroidViewModel(app) {
     private val context = app.applicationContext
 
     init {
-        // Charger historique au démarrage
+        AppSettings.init(context) // assure que la valeur max est chargée
         val (savedHistory, lastScan) = AnalysisStore.loadHistory(context)
-        _ui.value = _ui.value.copy(
-            history = savedHistory,
-            lastUpdate = lastScan
-        )
+        _ui.value = _ui.value.copy(history = savedHistory, lastUpdate = lastScan)
     }
 
     fun start() {
         _ui.value = _ui.value.copy(scanning = true)
 
         mqtt.connectAndSubscribe("Distance") { payload: String ->
-            Log.d("MQTT", "Payload reçu: $payload")
-
             val dist = parseDistance(payload)
-            Log.d("MQTT", "Distance parsée: $dist")
+            if (dist == null) {
+                Log.w("MQTT", "Cannot parse payload: $payload")
+                return@connectAndSubscribe
+            }
 
-            dist?.let {
-                val maxDistance = 1200f // valeur forcée pour le test
-                Log.d("MQTT", "Max distance forcée: $maxDistance mm")
+            val max = AppSettings.maxDistanceMmFlow.value.takeIf { it > 0f }
+            if (max == null) {
+                Log.w("MQTT", "Max distance not set yet, ignoring reading")
+                return@connectAndSubscribe
+            }
 
-                val percent = ((maxDistance - it) / maxDistance * 100f)
-                    .coerceIn(0f, 100f)
-                Log.d("MQTT", "Pourcentage calculé: $percent %")
+            val percent = ((max - dist) / max * 100f).coerceIn(0f, 100f)
 
-                viewModelScope.launch {
-                    val newHistory = _ui.value.history + HistoryPoint(
-                        percent,
-                        System.currentTimeMillis()
-                    )
-
-                    _ui.value = _ui.value.copy(
-                        scanning = true,
-                        percent = percent,
-                        history = newHistory,
-                        lastUpdate = System.currentTimeMillis()
-                    )
-
-                    // Sauvegarde
-                    AnalysisStore.saveHistory(context, newHistory)
-                }
-            } ?: Log.w("MQTT", "Impossible de parser le payload")
+            viewModelScope.launch {
+                val newHistory = _ui.value.history + HistoryPoint(
+                    percent = percent,
+                    ts = System.currentTimeMillis()
+                )
+                _ui.value = _ui.value.copy(
+                    scanning = true,
+                    percent = percent,
+                    history = newHistory,
+                    lastUpdate = System.currentTimeMillis()
+                )
+                AnalysisStore.saveHistory(context, newHistory)
+            }
         }
     }
 

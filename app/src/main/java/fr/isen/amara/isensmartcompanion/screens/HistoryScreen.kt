@@ -29,52 +29,33 @@ fun HistoryScreen() {
     val ui by vm.ui.collectAsState()
     val fullHistory = ui.history
 
-    // ===== Filtres =====
-    var window by remember { mutableStateOf(TimeWindow.ALL) }
-    var level by remember { mutableStateOf(LevelFilter.ALL) }
-    var selectedDate by remember { mutableStateOf<String?>(null) } // si != null, on affiche uniquement cette date
+    // ===== Filtres (état regroupé) =====
+    var filters by remember {
+        mutableStateOf(FilterState(window = TimeWindow.ALL, level = LevelFilter.ALL, date = null))
+    }
 
-    // Liste des dates disponibles (yyyy-MM-dd)
     val availableDates = remember(fullHistory) {
         fullHistory.map { formatDateOnly(it.ts) }.distinct().sortedDescending()
     }
 
     // ===== Application des filtres =====
     val now = System.currentTimeMillis()
-    val fromTs = when (window) {
-        TimeWindow.H1  -> now - 1L * 60 * 60 * 1000
-        TimeWindow.H6  -> now - 6L * 60 * 60 * 1000
-        TimeWindow.H24 -> now - 24L * 60 * 60 * 1000
-        TimeWindow.ALL -> Long.MIN_VALUE
+    val filtered = remember(fullHistory, filters, now) {
+        applyFilters(
+            history = fullHistory,
+            window = filters.window,
+            level = filters.level,
+            selectedDate = filters.date,
+            now = now
+        )
     }
 
-    val baseFiltered = remember(fullHistory, window, selectedDate) {
-        fullHistory
-            .asSequence()
-            .filter { it.ts >= fromTs }
-            .filter { sel ->
-                selectedDate?.let { formatDateOnly(sel.ts) == it } ?: true
-            }
-            .toList()
-    }
-
-    val filtered = remember(baseFiltered, level) {
-        baseFiltered.filter { hp ->
-            when (level) {
-                LevelFilter.ALL     -> true
-                LevelFilter.LOW     -> hp.percent < 50f
-                LevelFilter.MEDIUM  -> hp.percent in 50f..79.999f
-                LevelFilter.HIGH    -> hp.percent in 80f..94.999f
-                LevelFilter.FULL    -> hp.percent >= 95f
-                LevelFilter.EMPTIES -> hp.percent == 0f
-            }
-        }
-    }
-
-    // ===== Stats rapides sur l’échantillon filtré =====
+    // ===== Stats rapides =====
     val minVal = filtered.minOfOrNull { it.percent }?.roundToInt()
     val maxVal = filtered.maxOfOrNull { it.percent }?.roundToInt()
-    val avgVal = filtered.takeIf { it.isNotEmpty() }?.map { it.percent }?.average()?.let { String.format(Locale.getDefault(), "%.1f", it) }
+    val avgVal = filtered.takeIf { it.isNotEmpty() }
+        ?.map { it.percent }?.average()
+        ?.let { String.format(Locale.getDefault(), "%.1f", it) }
 
     // ===== Groupement par date =====
     val grouped = remember(filtered) {
@@ -88,26 +69,30 @@ fun HistoryScreen() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Header
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text("History", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
             Text(if (ui.scanning) "Listening..." else "Idle", fontSize = 12.sp, color = Color.Gray)
         }
 
         // Filtres
         FilterBar(
-            window = window,
-            onWindowChange = { window = it; selectedDate = null }, // si on change de fenêtre, on libère la date spécifique
-            level = level,
-            onLevelChange = { level = it },
-            date = selectedDate,
-            onDateChange = { selectedDate = it },
+            window = filters.window,
+            onWindowChange = { w -> filters = filters.copy(window = w, date = null) },
+            level = filters.level,
+            onLevelChange = { lf -> filters = filters.copy(level = lf) },
+            date = filters.date,
+            onDateChange = { d -> filters = filters.copy(date = d) },
             availableDates = availableDates
         )
 
-        // Stats rapides
+        // Stats
         StatsCard(minVal = minVal, maxVal = maxVal, avgVal = avgVal, count = filtered.size)
 
-        // Liste groupée
+        // Liste
         if (filtered.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No matching data.", fontSize = 16.sp, color = Color.Gray)
@@ -134,6 +119,49 @@ fun HistoryScreen() {
     }
 }
 
+/* ==================== Filtrage ==================== */
+
+private data class FilterState(
+    val window: TimeWindow,
+    val level: LevelFilter,
+    val date: String?
+)
+
+private fun applyFilters(
+    history: List<HistoryPoint>,
+    window: TimeWindow,
+    level: LevelFilter,
+    selectedDate: String?,
+    now: Long
+): List<HistoryPoint> {
+    val fromTs = timeFrom(window, now)
+
+    val base = history
+        .asSequence()
+        .filter { it.ts >= fromTs }
+        .filter { hp -> selectedDate?.let { formatDateOnly(hp.ts) == it } ?: true }
+        .toList()
+
+    return base.filter { hp ->
+        when (level) {
+            LevelFilter.ALL -> true
+            LevelFilter.LOW -> hp.percent < 50f
+            LevelFilter.MEDIUM -> hp.percent in 50f..79.999f
+            LevelFilter.HIGH -> hp.percent in 80f..94.999f
+            LevelFilter.FULL -> hp.percent >= 95f
+            LevelFilter.EMPTY -> hp.percent == 0f
+        }
+    }
+}
+
+private fun timeFrom(window: TimeWindow, now: Long): Long =
+    when (window) {
+        TimeWindow.H1 -> now - 1L * 60 * 60 * 1000
+        TimeWindow.H6 -> now - 6L * 60 * 60 * 1000
+        TimeWindow.H24 -> now - 24L * 60 * 60 * 1000
+        TimeWindow.ALL -> Long.MIN_VALUE
+    }
+
 /* ==================== UI Blocks ==================== */
 
 @Composable
@@ -146,50 +174,117 @@ private fun FilterBar(
     onDateChange: (String?) -> Unit,
     availableDates: List<String>
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // Fenêtre temporelle
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Time window", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        ChipRowEqual {
             TimeWindow.values().forEach { w ->
-                FilterChip(
+                EqualFilterChip(
                     selected = window == w,
                     onClick = { onWindowChange(w) },
-                    label = { Text(w.label) }
+                    label = w.label
                 )
             }
         }
 
-        // Niveau
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Niveaux
+        Text("Level", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        ChipRowEqual {
             LevelFilter.values().forEach { lf ->
-                FilterChip(
+                LevelFilterChip(
+                    level = lf,
                     selected = level == lf,
-                    onClick = { onLevelChange(lf) },
-                    label = { Text(lf.label) }
+                    onClick = { onLevelChange(lf) }
                 )
             }
         }
 
-        // Date précise (optionnelle)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AssistChip(
-                onClick = { onDateChange(null) },
-                label = { Text("All dates") },
-                leadingIcon = {},
-                enabled = date != null
-            )
-            availableDates.take(7).forEach { d -> // on affiche les 7 dernières dates pour rester compact
-                FilterChip(
-                    selected = date == d,
-                    onClick = { onDateChange(d) },
-                    label = { Text(d) }
+        // Dates
+        Text("Date", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+        val dateLabels = listOf<String?>(null) + availableDates
+        dateLabels.chunked(4).forEach { row ->
+            ChipRowEqual(expectedItems = 4, actualItems = row.size) {
+                row.forEach { d ->
+                    EqualFilterChip(
+                        selected = date == d,
+                        onClick = { onDateChange(d) },
+                        label = d ?: "All dates"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChipRowEqual(
+    expectedItems: Int? = null,
+    actualItems: Int? = null,
+    content: @Composable RowScope.() -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        content()
+        // Pour compléter la ligne si moins de 4 éléments
+        if (expectedItems != null && actualItems != null && actualItems < expectedItems) {
+            repeat(expectedItems - actualItems) {
+                Spacer(
+                    modifier = Modifier.width(90.dp)
                 )
             }
         }
     }
+}
+
+@Composable
+private fun EqualFilterChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, maxLines = 1) },
+        modifier = Modifier
+            .width(90.dp)   // largeur fixe pour alignement — ajuste selon le längueur de tes labels
+            .height(40.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            selectedLabelColor = MaterialTheme.colorScheme.onSurface
+        )
+    )
+}
+
+@Composable
+private fun LevelFilterChip(
+    level: LevelFilter,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val (selContainer, selLabel) = when (level) {
+        LevelFilter.ALL -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) to MaterialTheme.colorScheme.onSurface
+        LevelFilter.LOW -> Color(0xFF43A047).copy(alpha = 0.18f) to Color(0xFF1B5E20)
+        LevelFilter.MEDIUM -> Color(0xFFFFD600).copy(alpha = 0.24f) to Color(0xFF8D6E00)
+        LevelFilter.HIGH -> Color(0xFFFF8F00).copy(alpha = 0.18f) to Color(0xFFE65100)
+        LevelFilter.FULL -> Color(0xFFC62828).copy(alpha = 0.18f) to Color(0xFFB71C1C)
+        LevelFilter.EMPTY -> Color(0xFFC8E6C9).copy(alpha = 0.50f) to Color(0xFF2E7D32)
+    }
+
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(level.label, maxLines = 1) },
+        modifier = Modifier
+            .width(90.dp)
+            .height(40.dp),
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = selContainer,
+            selectedLabelColor = selLabel
+        )
+    )
 }
 
 @Composable
@@ -225,10 +320,11 @@ private fun StatsCard(
 private fun HistoryRow(hp: HistoryPoint) {
     val p = hp.percent
     val (bg, txt) = when {
-        p >= 95f -> Color(0xFFFFEBEE) to Color(0xFFC62828) // full
-        p >= 80f -> Color(0xFFFFF3E0) to Color(0xFFEF6C00) // high
-        p >= 50f -> Color(0xFFFFFDE7) to Color(0xFFFBC02D) // medium
-        else     -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
+        p == 0f -> Color(0xFFC8E6C9) to Color(0xFF2E7D32)
+        p >= 95f -> Color(0xFFFFEBEE) to Color(0xFFC62828)
+        p >= 80f -> Color(0xFFFFF3E0) to Color(0xFFEF6C00)
+        p >= 50f -> Color(0xFFFFFDE7) to Color(0xFFFBC02D)
+        else -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
     }
 
     Card(
@@ -261,7 +357,7 @@ private enum class LevelFilter(val label: String) {
     MEDIUM("Medium"),
     HIGH("High"),
     FULL("Full"),
-    EMPTIES("Empties")
+    EMPTY("Empty")
 }
 
 private fun formatDateOnly(millis: Long): String {

@@ -1,15 +1,17 @@
+// MainNavigation.kt
 package fr.isen.amara.isensmartcompanion
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.*
 import fr.isen.amara.isensmartcompanion.screens.*
-import androidx.compose.foundation.layout.padding
 
 @Composable
 fun MainNavigation() {
@@ -19,6 +21,8 @@ fun MainNavigation() {
     Scaffold(
         bottomBar = {
             NavigationBar {
+                val backStack by navController.currentBackStackEntryAsState()
+                val current = backStack?.destination?.route
                 items.forEach { screen ->
                     NavigationBarItem(
                         icon = {
@@ -29,7 +33,7 @@ fun MainNavigation() {
                             }
                         },
                         label = { Text(screen.replaceFirstChar { it.uppercaseChar() }) },
-                        selected = navController.currentBackStackEntryAsState().value?.destination?.route == screen,
+                        selected = current == screen,
                         onClick = {
                             navController.navigate(screen) {
                                 launchSingleTop = true
@@ -41,16 +45,12 @@ fun MainNavigation() {
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(innerPadding)
-        ) {
+        NavHost(navController = navController, startDestination = "home", modifier = Modifier.padding(innerPadding)) {
             composable("home") { TrashStatusScreen(navController) }
             composable("assistant") { AssistantScreen() }
             composable("settings") { SettingsScreen() }
 
-            // ✅ Routes supplémentaires
+            // Routes supplémentaires existantes
             composable("binState") { BinStateScreen() }
             composable("binLevel") { BinLevelScreen() }
             composable("history") { HistoryScreen() }

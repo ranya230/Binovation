@@ -3,27 +3,43 @@ package fr.isen.amara.isensmartcompanion
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.navigation.NavHostController
-import androidx.navigation.compose.*
-import fr.isen.amara.isensmartcompanion.screens.*
+import com.google.firebase.auth.FirebaseAuth
+import fr.isen.amara.isensmartcompanion.screens.AppGate
 import fr.isen.amara.isensmartcompanion.ui.theme.ISENSmartCompanionTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            RequestNotificationPermission()
-
             ISENSmartCompanionTheme {
-                val navController = rememberNavController()
-                AuthNavigation(navController)
+                AppRoot()
             }
+        }
+    }
+}
+
+@Composable
+private fun AppRoot() {
+    val auth = remember { FirebaseAuth.getInstance() }
+    var user by remember { mutableStateOf(auth.currentUser) }
+
+    // Écoute l'état d'auth
+    DisposableEffect(Unit) {
+        val listener = FirebaseAuth.AuthStateListener { fb ->
+            user = fb.currentUser
+        }
+        auth.addAuthStateListener(listener)
+        onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    if (user == null) {
+        // Phase Auth: Login / Register / Reset
+        AuthNavHost()
+    } else {
+        // Phase App: gate hauteur -> app
+        AppGate {
+            MainNavigation()
         }
     }
 }

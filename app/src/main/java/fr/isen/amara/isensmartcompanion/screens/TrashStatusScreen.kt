@@ -1,6 +1,6 @@
+// TrashStatusScreen.kt
 package fr.isen.amara.isensmartcompanion.screens
 
-import android.content.Context
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.*
@@ -14,141 +14,74 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import fr.isen.amara.isensmartcompanion.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONObject
-import androidx.navigation.NavController
-import fr.isen.amara.isensmartcompanion.R
+import androidx.compose.foundation.layout.RowScope
 
-/* ====== Utils: sauvegarde / lecture hauteur max ====== */
-fun saveMaxDistance(context: Context, value: Float) {
-    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    prefs.edit().putFloat("max_distance", value).apply()
-}
-
-fun getMaxDistance(context: Context): Float {
-    val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    return prefs.getFloat("max_distance", 1200f)
-}
-
-/* ====== Parsing robuste du payload MQTT ====== */
-private fun parseDistanceSafe(message: String): Float? {
-    // 1) JSON {"distance": 1200} ou {"Distance": 1200}
-    try {
-        val json = JSONObject(message)
-        if (json.has("distance")) {
-            val v = json.get("distance")
-            return (v as? Number)?.toFloat() ?: (v as? String)?.toFloatOrNull()
-        }
-        if (json.has("Distance")) {
-            val v = json.get("Distance")
-            return (v as? Number)?.toFloat() ?: (v as? String)?.toFloatOrNull()
-        }
-    } catch (_: Exception) { /* pas JSON objet */ }
-
-    // 2) nombre brut "1200"
-    message.toFloatOrNull()?.let { return it }
-
-    // 3) "Distance: 1200" ou similaire
-    val regex = Regex("""-?\d+(\.\d+)?""")
-    return regex.find(message)?.value?.toFloatOrNull()
-}
-
-/* ====== Écran principal ====== */
 @Composable
 fun TrashStatusScreen(navController: NavController) {
     val context = LocalContext.current
+    LaunchedEffect(Unit) { AppSettings.init(context) }
+
+    val maxDistanceMm by AppSettings.maxDistanceMmFlow.collectAsState()
     val mqttClient = remember { MqttClientHelper(context) }
     val scope = rememberCoroutineScope()
 
-    // Paramètres
-    val inactivityMs = 12_000L // revenir à 0% si aucune donnée pendant 12 s
-    val maxDistancePref = remember { getMaxDistance(context) }
-
-    // Etat "pas de donnée encore" -> on force 0% tant qu'aucune lecture valide
-    var hasReading by remember { mutableStateOf(false) }
-
-    // Distance courante; on initialise à maxDistance pour que le calcul donne 0 %
-    var distance by remember { mutableStateOf(maxDistancePref) }
-
-    // On garde maxDistance séparé si tu le changes un jour dans Settings
-    var maxDistance by remember { mutableStateOf(maxDistancePref) }
-
-    var scanStatus by remember { mutableStateOf("") }
-    var notificationSent by remember { mutableStateOf(false) }
-    var lastMsgTs by remember { mutableStateOf(0L) }
-
-    // Pour ignorer un éventuel message "retained" au 1er abonnement
-    var firstMessageIgnored by remember { mutableStateOf(false) }
-
-    val fillPercentage = if (hasReading) {
-        ((maxDistance - distance) / maxDistance * 100f).coerceIn(0f, 100f)
-    } else {
-        0f
+    if (maxDistanceMm <= 0f) {
+        Text("Please set your bin height first.")
+        return
     }
 
-    /* Connexion / abonnement MQTT + cleanup */
-    DisposableEffect(Unit) {
-        // 1) Connexion
-        mqttClient.connect(onConnected = {
-            // 2) Tentative de purge du message retenu sur le topic Distance
-            //    -> publier payload vide en retained pour effacer côté broker
-            mqttClient.publish(topic = "Distance", payload = "", qos = 1, retained = true)
+    var hasReading by remember { mutableStateOf(false) }
+    var distanceMm by remember { mutableStateOf(0f) }
+    var lastMsgTs by remember { mutableStateOf(0L) }
+    val inactivityMs = 12_000L
 
-            // 3) Abonnement
-            mqttClient.subscribe(topic = "Distance", qos = 1) { payload ->
-                val newDist = parseDistanceSafe(payload) ?: return@subscribe
+    val fillPercent = if (hasReading) {
+        ((maxDistanceMm - distanceMm) / maxDistanceMm * 100f).coerceIn(0f, 100f)
+    } else 0f
 
-                // bornes simples (0 .. 1.2*max)
-                if (newDist < 0f || newDist > maxDistance * 1.2f) return@subscribe
-
-                // ignorer le tout premier message après abonnement (souvent retained)
-                if (!firstMessageIgnored) {
-                    firstMessageIgnored = true
-                    return@subscribe
-                }
-
-                distance = newDist
-                hasReading = true
-                lastMsgTs = System.currentTimeMillis()
-            }
-        })
-
+    DisposableEffect(maxDistanceMm) {
+        if (!hasReading) distanceMm = 0f
+        mqttClient.connectAndSubscribe("Distance") { payload ->
+            val newDist = parseDistance(payload) ?: return@connectAndSubscribe
+            distanceMm = newDist
+            hasReading = true
+            lastMsgTs = System.currentTimeMillis()
+        }
         onDispose {
             mqttClient.unsubscribe("Distance")
             mqttClient.disconnect()
-            // reset visuel quand on quitte l'écran
             hasReading = false
-            distance = maxDistance
+            distanceMm = 0f
         }
     }
 
-    /* Retour auto à 0% après inactivité */
-    LaunchedEffect(lastMsgTs, hasReading, maxDistance) {
+    LaunchedEffect(lastMsgTs, hasReading, maxDistanceMm) {
         if (hasReading) {
             delay(inactivityMs)
             val now = System.currentTimeMillis()
             if (now - lastMsgTs >= inactivityMs) {
                 hasReading = false
-                distance = maxDistance // 0%
-                firstMessageIgnored = false // prêt pour prochaine session
+                distanceMm = 0f
             }
         }
     }
 
-    /* Notification si presque plein (uniquement si on a des vraies données) */
-    LaunchedEffect(fillPercentage, hasReading) {
-        if (hasReading && fillPercentage >= 95 && !notificationSent) {
+    var scanStatus by remember { mutableStateOf("") }
+    var notificationSent by remember { mutableStateOf(false) }
+
+    LaunchedEffect(fillPercent, hasReading) {
+        if (hasReading && fillPercent >= 95 && !notificationSent) {
             showFullNotification(context)
             notificationSent = true
         }
-        if (fillPercentage < 90) {
-            notificationSent = false
-        }
+        if (fillPercent < 90) notificationSent = false
     }
 
-    /* UI */
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -156,25 +89,43 @@ fun TrashStatusScreen(navController: NavController) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        /* Logos top */
+        // --- Header logos : même taille pour les deux ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.isen),
-                contentDescription = "ISEN Logo",
-                modifier = Modifier.size(70.dp)
-            )
-            Image(
-                painter = painterResource(id = R.drawable.binovation_logo),
-                contentDescription = "Binovation Logo",
-                modifier = Modifier.size(70.dp)
-            )
+            val headerIconSize = 64.dp
+            Image(painterResource(R.drawable.isen), contentDescription = "ISEN", modifier = Modifier.size(headerIconSize))
+            Image(painterResource(R.drawable.binovation_logo), contentDescription = "Binovation", modifier = Modifier.size(headerIconSize))
         }
 
-        /* Carte status */
+        // --- Carte niveau courant (inchangée) ---
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            var showEdit by remember { mutableStateOf(false) }
+            Row(
+                Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Bin height: ${maxDistanceMm.toInt()} mm", fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { showEdit = true }) { Text("Edit") }
+            }
+            if (showEdit) {
+                MaxHeightDialog(
+                    initialMm = maxDistanceMm,
+                    onDismiss = { showEdit = false },
+                    onApply = {
+                        AppSettings.setMaxDistanceMm(context, it)
+                        showEdit = false
+                    }
+                )
+            }
+        }
+
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -190,70 +141,47 @@ fun TrashStatusScreen(navController: NavController) {
                     contentDescription = "Trash Bin",
                     modifier = Modifier.size(140.dp)
                 )
-
                 Text(
-                    text = "Current fill level: ${fillPercentage.toInt()}%",
+                    text = "Current fill level: ${fillPercent.toInt()}%",
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 )
-
                 LinearProgressIndicator(
-                    progress = fillPercentage / 100f,
+                    progress = fillPercent / 100f,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(10.dp),
                     color = when {
-                        fillPercentage >= 95 -> Color(0xFFC62828)
-                        fillPercentage >= 80 -> Color(0xFFFF8F00)
-                        fillPercentage >= 50 -> Color(0xFFFFD600)
+                        fillPercent >= 95 -> Color(0xFFC62828)
+                        fillPercent >= 80 -> Color(0xFFFF8F00)
+                        fillPercent >= 50 -> Color(0xFFFFD600)
                         else -> Color(0xFF43A047)
                     }
                 )
-
-                // Indication d'état pour compréhension
-                val status = when {
-                    !hasReading -> "Waiting for data..."
-                    else -> "Live"
-                }
+                val status = if (!hasReading) "Waiting for data..." else "Live"
                 Text(status, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
-        /* Bouton Scan */
         Button(
             onClick = {
                 scope.launch(Dispatchers.IO) {
-                    // on réinitialise l'état avant une nouvelle session
                     hasReading = false
-                    distance = maxDistance
-                    firstMessageIgnored = false
+                    distanceMm = 0f
                     mqttClient.publish("smartbin/scan", "start")
-                    scanStatus = "Scan sent!"
+                    scanStatus = "Scan sent"
                     delay(2500)
                     scanStatus = ""
                 }
             },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("Scan Now")
-        }
+        ) { Text("Scan Now") }
 
         if (scanStatus.isNotEmpty()) {
-            Text(
-                text = scanStatus,
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp
-            )
+            Text(scanStatus, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
         }
 
-        /* Navigation */
-        Text(
-            "Navigation",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-
+        // --- NAV CARDS (texte “Navigation” supprimé, on garde la grille) ---
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
@@ -270,9 +198,8 @@ fun TrashStatusScreen(navController: NavController) {
     }
 }
 
-/* ====== Cartes menu (RowScope pour que weight() fonctionne) ====== */
 @Composable
-fun RowScope.MenuCard(title: String, onClick: () -> Unit) {
+private fun RowScope.MenuCard(title: String, onClick: () -> Unit) {
     Card(
         onClick = onClick,
         modifier = Modifier
@@ -282,11 +209,62 @@ fun RowScope.MenuCard(title: String, onClick: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            Text(
-                title,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            Text(title, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MaxHeightDialog(
+    initialMm: Float,
+    onDismiss: () -> Unit,
+    onApply: (Float) -> Unit
+) {
+    var unitIsMm by remember { mutableStateOf(true) }
+    var numberText by remember { mutableStateOf(initialMm.toInt().toString()) }
+
+    val parsedMm = remember(numberText, unitIsMm) {
+        val n = numberText.trim().replace(',', '.').toFloatOrNull()
+        val mm = if (n == null) null else if (unitIsMm) n else n * 10f
+        mm?.takeIf { it > 0f }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit bin height") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = numberText,
+                    onValueChange = { numberText = it },
+                    label = { Text(if (unitIsMm) "Height (mm)" else "Height (cm)") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    )
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilterChip(selected = unitIsMm, onClick = {
+                        if (!unitIsMm) {
+                            val v = numberText.trim().replace(',', '.').toFloatOrNull()
+                            numberText = v?.let { (it * 10f).toInt().toString() } ?: numberText
+                            unitIsMm = true
+                        }
+                    }, label = { Text("mm") })
+                    FilterChip(selected = !unitIsMm, onClick = {
+                        if (unitIsMm) {
+                            val v = numberText.trim().replace(',', '.').toFloatOrNull()
+                            numberText = v?.let { (it / 10f).toString() } ?: numberText
+                            unitIsMm = false
+                        }
+                    }, label = { Text("cm") })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { parsedMm?.let(onApply) }, enabled = parsedMm != null) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
