@@ -43,6 +43,10 @@ fun SettingsScreen(navController: NavController? = null) {
     val auth = FirebaseAuth.getInstance()
     val user = auth.currentUser
 
+    // 🔄 Charger AppSettings (pour la hauteur)
+    LaunchedEffect(Unit) { AppSettings.init(context) }
+    val maxMm by AppSettings.maxDistanceMmFlow.collectAsState()
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -51,6 +55,9 @@ fun SettingsScreen(navController: NavController? = null) {
     var notificationsEnabled by remember { mutableStateOf(prefs.getBoolean("notifications", true)) }
     var profileUri by remember { mutableStateOf<Uri?>(null) }
     var passwordVisible by remember { mutableStateOf(false) }
+
+    // Dialog pour éditer la hauteur
+    var showHeightDialog by remember { mutableStateOf(false) }
 
     // Charger avatar si déjà sauvegardé
     LaunchedEffect(Unit) {
@@ -82,7 +89,7 @@ fun SettingsScreen(navController: NavController? = null) {
                 Text("Settings", fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
 
-            // Profil + Username (affiché au-dessus de la photo)
+            // Profil + Username affiché + photo + email
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -93,14 +100,8 @@ fun SettingsScreen(navController: NavController? = null) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // 🔹 Username affiché (non modifiable)
-                        Text(
-                            text = username,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text(text = username, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-                        // Photo
                         Image(
                             painter = if (profileUri != null)
                                 rememberAsyncImagePainter(profileUri)
@@ -114,7 +115,6 @@ fun SettingsScreen(navController: NavController? = null) {
                             contentScale = ContentScale.Crop
                         )
 
-                        // Email (non modifiable)
                         OutlinedTextField(
                             value = user?.email ?: "No email",
                             onValueChange = {},
@@ -128,7 +128,34 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
 
-            // Champ Username modifiable
+            // 🔧 Carte: Hauteur de poubelle (édition ici aussi)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Bin height", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (maxMm > 0f) "${maxMm.toInt()} mm" else "Not set",
+                            fontSize = 16.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showHeightDialog = true }) {
+                                Text(if (maxMm > 0f) "Edit" else "Set")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Username modifiable
             item {
                 OutlinedTextField(
                     value = username,
@@ -166,7 +193,7 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
 
-            // Changer mot de passe (affichage/masquage)
+            // Changement de mot de passe
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -239,7 +266,7 @@ fun SettingsScreen(navController: NavController? = null) {
                     onClick = {
                         auth.signOut()
                         navController?.navigate("login") {
-                            popUpTo("settings") { inclusive = true } // vide la backstack
+                            popUpTo("settings") { inclusive = true }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -270,4 +297,106 @@ fun SettingsScreen(navController: NavController? = null) {
             }
         }
     }
+
+    // --- Dialog édition hauteur (mm/cm/m), identique à la logique du gate ---
+    if (showHeightDialog) {
+        HeightEditDialog(
+            initialMm = maxMm.takeIf { it > 0f },
+            onDismiss = { showHeightDialog = false },
+            onApply = { mm ->
+                AppSettings.setMaxDistanceMm(context, mm)
+                showHeightDialog = false
+            }
+        )
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialog réutilisable pour saisir la hauteur en mm / cm / m          */
+/* S’aligne avec UnitChoice (définie publique dans AppGate.kt)        */
+/* ------------------------------------------------------------------ */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HeightEditDialog(
+    initialMm: Float?,
+    onDismiss: () -> Unit,
+    onApply: (Float) -> Unit
+) {
+    var unit by remember { mutableStateOf(UnitChoice.MM) }
+    var valueText by remember {
+        mutableStateOf(
+            initialMm?.takeIf { it > 0f }?.toInt()?.toString() ?: ""
+        )
+    }
+
+    val parsedMm = remember(valueText, unit) {
+        val n = valueText.trim().replace(',', '.').toFloatOrNull()
+        val mm = when (unit) {
+            UnitChoice.MM -> n
+            UnitChoice.CM -> n?.times(10f)
+            UnitChoice.M  -> n?.times(1000f)
+        }
+        mm?.takeIf { it > 0f }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set bin height") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = valueText,
+                    onValueChange = { valueText = it },
+                    label = {
+                        Text(
+                            when (unit) {
+                                UnitChoice.MM -> "Height (mm)"
+                                UnitChoice.CM -> "Height (cm)"
+                                UnitChoice.M  -> "Height (m)"
+                            }
+                        )
+                    },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilterChip(
+                        selected = unit == UnitChoice.MM,
+                        onClick = { unit = UnitChoice.MM },
+                        label = { Text("mm") }
+                    )
+                    FilterChip(
+                        selected = unit == UnitChoice.CM,
+                        onClick = { unit = UnitChoice.CM },
+                        label = { Text("cm") }
+                    )
+                    FilterChip(
+                        selected = unit == UnitChoice.M,
+                        onClick = { unit = UnitChoice.M },
+                        label = { Text("m") }
+                    )
+                }
+                if (initialMm == null || initialMm <= 0f) {
+                    Text(
+                        "Required to unlock bin screens.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { parsedMm?.let(onApply) },
+                enabled = parsedMm != null
+            ) { Text("Apply") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

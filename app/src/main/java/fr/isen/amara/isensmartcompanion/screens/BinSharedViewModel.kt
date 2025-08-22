@@ -1,3 +1,4 @@
+// BinSharedViewModel.kt
 package fr.isen.amara.isensmartcompanion.screens
 
 import android.app.Application
@@ -24,7 +25,7 @@ class BinSharedViewModel(app: Application) : AndroidViewModel(app) {
     private val context = app.applicationContext
 
     init {
-        AppSettings.init(context) // assure que la valeur max est chargée
+        AppSettings.init(context) // charge la valeur max si déjà enregistrée
         val (savedHistory, lastScan) = AnalysisStore.loadHistory(context)
         _ui.value = _ui.value.copy(history = savedHistory, lastUpdate = lastScan)
     }

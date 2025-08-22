@@ -1,3 +1,4 @@
+// BinStateScreen.kt
 package fr.isen.amara.isensmartcompanion.screens
 
 import android.app.Application
@@ -10,7 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -20,15 +20,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
-import java.util.*
-import kotlin.math.max
+import java.util.Locale
+import java.util.Date
 
 @Composable
 fun BinStateScreen() {
     val app = LocalContext.current.applicationContext as Application
-    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    val vm: BinSharedViewModel = viewModel(
+        factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app)
     )
     LaunchedEffect(Unit) { vm.start() }
 
@@ -238,7 +240,7 @@ private fun secondsAgoString(ts: Long): String {
 private fun formatTime(millis: Long): String =
     SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(millis))
 
-/* ===== Sparkline simple ===== */
+/* ===== Sparkline corrigé (moveTo/lineTo avec x,y Float) ===== */
 @Composable
 private fun Sparkline(
     points: List<Float>,
@@ -257,7 +259,7 @@ private fun Sparkline(
         val h = size.height
         val minY = points.minOrNull() ?: 0f
         val maxY = points.maxOrNull() ?: 100f
-        val spanY = max(1f, maxY - minY)
+        val spanY = kotlin.math.max(1f, maxY - minY)
 
         val stepX = (w - 2 * padding) / (points.size - 1).coerceAtLeast(1)
         val path = Path()
@@ -265,7 +267,11 @@ private fun Sparkline(
         points.forEachIndexed { i, v ->
             val x = padding + i * stepX
             val y = padding + (h - 2 * padding) * (1f - (v - minY) / spanY)
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            if (i == 0) {
+                path.moveTo(x, y)      // ✅ utilise (x, y)
+            } else {
+                path.lineTo(x, y)      // ✅ utilise (x, y)
+            }
         }
 
         drawPath(

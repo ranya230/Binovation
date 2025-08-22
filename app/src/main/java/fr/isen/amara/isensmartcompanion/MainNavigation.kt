@@ -44,12 +44,16 @@ fun MainNavigation() {
             }
         }
     ) { innerPadding ->
-        NavHost(navController = navController, startDestination = "home", modifier = Modifier.padding(innerPadding)) {
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(innerPadding)
+        ) {
             composable("home") { TrashStatusScreen(navController) }
             composable("assistant") { AssistantScreen() }
-            composable("settings") { SettingsScreen() }
+            composable("settings") { SettingsScreen(navController) }
 
-            // Extra écrans
+            // Écrans additionnels
             composable("binState") { BinStateScreen() }
             composable("binLevel") { BinLevelScreen() }
             composable("history") { HistoryScreen() }

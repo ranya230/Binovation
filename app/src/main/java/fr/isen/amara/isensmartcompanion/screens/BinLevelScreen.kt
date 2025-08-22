@@ -1,26 +1,34 @@
+// BinLevelScreen.kt
 package fr.isen.amara.isensmartcompanion.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.Card
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import fr.isen.amara.isensmartcompanion.R
 import kotlin.math.roundToInt
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
 
 @Composable
 fun BinLevelScreen() {
     val app = LocalContext.current.applicationContext as android.app.Application
-    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    val vm: BinSharedViewModel = viewModel(
+        factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app)
     )
 
     LaunchedEffect(Unit) { vm.start() }
@@ -28,16 +36,14 @@ fun BinLevelScreen() {
     val ui by vm.ui.collectAsState()
     val percent = ui.percent ?: 0f
 
-    // ✅ Couleur/texte d’état selon le pourcentage
     val statusColor = when {
-        percent >= 95f -> Color(0xFFC62828) // Rouge
-        percent >= 80f -> Color(0xFFFF8F00) // Orange
-        percent >= 50f -> Color(0xFFFFD600) // Jaune
-        else -> Color(0xFF43A047)          // Vert
+        percent >= 95f -> Color(0xFFC62828) // rouge
+        percent >= 80f -> Color(0xFFFF8F00) // orange
+        percent >= 50f -> Color(0xFFFFD600) // jaune
+        else -> Color(0xFF43A047)          // vert
     }
     val statusText = if (percent >= 95f) "The bin must be emptied." else ""
 
-    // ✅ UI
     Column(
         modifier = Modifier
             .fillMaxSize()

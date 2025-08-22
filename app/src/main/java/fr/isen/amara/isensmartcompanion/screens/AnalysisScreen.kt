@@ -1,3 +1,4 @@
+// AnalysisScreen.kt
 package fr.isen.amara.isensmartcompanion.screens
 
 import androidx.compose.foundation.layout.*
@@ -18,23 +19,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.ceil
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
 
 @Composable
 fun AnalysisScreen() {
     val app = LocalContext.current.applicationContext as android.app.Application
-    val vm: BinSharedViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(app)
+    val vm: BinSharedViewModel = viewModel(
+        factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app)
     )
 
     LaunchedEffect(Unit) { vm.start() }
 
     val ui by vm.ui.collectAsState()
     val history = ui.history
-
     val lastUpdateStr = ui.lastUpdate?.let { formatDateTime(it) } ?: "—"
 
-    // ==== Calculs ====
     val delta24h = remember(history.size) { deltaLastHours(24, history) }
     val slope10minPerMin = remember(history.size) { slopeLastMinutes(10, history) }
     val slope10minPerHour = slope10minPerMin?.let { it * 60f }
@@ -45,7 +45,6 @@ fun AnalysisScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // === HEADER ===
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -55,7 +54,6 @@ fun AnalysisScreen() {
             Text(if (ui.scanning) "Scanning..." else "Idle", fontSize = 12.sp, color = Color.Gray)
         }
 
-        // === NIVEAU ACTUEL ===
         ElevatedCard(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth()
@@ -86,7 +84,6 @@ fun AnalysisScreen() {
             }
         }
 
-        // === SYNTHÈSE ===
         ElevatedCard(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth()
@@ -94,7 +91,6 @@ fun AnalysisScreen() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Summary", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
 
-                // Δ 24h
                 val deltaTxt = delta24h?.let { String.format(Locale.getDefault(), "%+.1f %%", it) } ?: "—"
                 Row(
                     Modifier.fillMaxWidth(),
@@ -114,13 +110,11 @@ fun AnalysisScreen() {
                     }
                 }
 
-                // Taux moyen
                 val rateTxt = slope10minPerHour?.let { String.format("%.2f %%/h", it) } ?: "—"
                 KeyValueRow("Avg rate (10 min)", rateTxt)
             }
         }
 
-        // === LECTURES ===
         ElevatedCard(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier
@@ -156,7 +150,7 @@ fun AnalysisScreen() {
     }
 }
 
-/* ===== UI Components ===== */
+/* ===== UI bits ===== */
 
 @Composable
 private fun KeyValueRow(label: String, value: String) {
@@ -185,9 +179,9 @@ private fun ReadingRow(p: HistoryPoint) {
 @Composable
 private fun levelColor(percent: Float): Color =
     when {
-        percent < 30f -> Color(0xFF2E7D32) // vert
-        percent < 70f -> Color(0xFFFFA000) // orange
-        else -> Color(0xFFC62828)          // rouge
+        percent < 30f -> Color(0xFF2E7D32)
+        percent < 70f -> Color(0xFFFFA000)
+        else -> Color(0xFFC62828)
     }
 
 /* ===== Helpers ===== */
