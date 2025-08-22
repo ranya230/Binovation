@@ -1,15 +1,15 @@
-// TrashStatusScreen.kt
 package fr.isen.amara.isensmartcompanion.screens
 
-import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -19,7 +19,6 @@ import fr.isen.amara.isensmartcompanion.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.layout.RowScope
 
 @Composable
 fun TrashStatusScreen(navController: NavController) {
@@ -27,13 +26,26 @@ fun TrashStatusScreen(navController: NavController) {
     LaunchedEffect(Unit) { AppSettings.init(context) }
 
     val maxDistanceMm by AppSettings.maxDistanceMmFlow.collectAsState()
-    val mqttClient = remember { MqttClientHelper(context) }
-    val scope = rememberCoroutineScope()
 
+    // 🚨 Si hauteur non définie → message clair
     if (maxDistanceMm <= 0f) {
-        Text("Please set your bin height first.")
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Please set your bin height first.",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Button(onClick = { navController.navigate("binSetup") }) {
+                    Text("Set bin height")
+                }
+            }
+        }
         return
     }
+
+    val mqttClient = remember { MqttClientHelper(context) }
+    val scope = rememberCoroutineScope()
 
     var hasReading by remember { mutableStateOf(false) }
     var distanceMm by remember { mutableStateOf(0f) }
@@ -44,6 +56,7 @@ fun TrashStatusScreen(navController: NavController) {
         ((maxDistanceMm - distanceMm) / maxDistanceMm * 100f).coerceIn(0f, 100f)
     } else 0f
 
+    // --- MQTT subscription ---
     DisposableEffect(maxDistanceMm) {
         if (!hasReading) distanceMm = 0f
         mqttClient.connectAndSubscribe("Distance") { payload ->
@@ -60,6 +73,7 @@ fun TrashStatusScreen(navController: NavController) {
         }
     }
 
+    // --- Reset data si inactivité ---
     LaunchedEffect(lastMsgTs, hasReading, maxDistanceMm) {
         if (hasReading) {
             delay(inactivityMs)
@@ -74,6 +88,7 @@ fun TrashStatusScreen(navController: NavController) {
     var scanStatus by remember { mutableStateOf("") }
     var notificationSent by remember { mutableStateOf(false) }
 
+    // Notification ≥95% une seule fois, reset si <90%
     LaunchedEffect(fillPercent, hasReading) {
         if (hasReading && fillPercent >= 95 && !notificationSent) {
             showFullNotification(context)
@@ -82,6 +97,7 @@ fun TrashStatusScreen(navController: NavController) {
         if (fillPercent < 90) notificationSent = false
     }
 
+    // --- UI ---
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -89,7 +105,7 @@ fun TrashStatusScreen(navController: NavController) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // --- Header logos : même taille pour les deux ---
+        // Logos
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -100,7 +116,7 @@ fun TrashStatusScreen(navController: NavController) {
             Image(painterResource(R.drawable.binovation_logo), contentDescription = "Binovation", modifier = Modifier.size(headerIconSize))
         }
 
-        // --- Carte niveau courant (inchangée) ---
+        // Carte hauteur
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp)
@@ -126,6 +142,7 @@ fun TrashStatusScreen(navController: NavController) {
             }
         }
 
+        // Carte niveau courant
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -136,13 +153,9 @@ fun TrashStatusScreen(navController: NavController) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.poubelle),
-                    contentDescription = "Trash Bin",
-                    modifier = Modifier.size(140.dp)
-                )
+                Image(painterResource(id = R.drawable.poubelle), contentDescription = "Trash Bin", modifier = Modifier.size(140.dp))
                 Text(
-                    text = "Current fill level: ${fillPercent.toInt()}%",
+                    "Current fill level: ${fillPercent.toInt()}%",
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 )
                 LinearProgressIndicator(
@@ -162,6 +175,7 @@ fun TrashStatusScreen(navController: NavController) {
             }
         }
 
+        // Bouton scan
         Button(
             onClick = {
                 scope.launch(Dispatchers.IO) {
@@ -181,11 +195,8 @@ fun TrashStatusScreen(navController: NavController) {
             Text(scanStatus, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
         }
 
-        // --- NAV CARDS (texte “Navigation” supprimé, on garde la grille) ---
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        // Navigation rapide
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 MenuCard("Bin Level") { navController.navigate("binLevel") }
                 MenuCard("Bin State") { navController.navigate("binState") }
@@ -221,12 +232,16 @@ private fun MaxHeightDialog(
     onDismiss: () -> Unit,
     onApply: (Float) -> Unit
 ) {
-    var unitIsMm by remember { mutableStateOf(true) }
-    var numberText by remember { mutableStateOf(initialMm.toInt().toString()) }
+    var unit by remember { mutableStateOf(UnitChoice.MM) }
+    var numberText by remember { mutableStateOf("") }
 
-    val parsedMm = remember(numberText, unitIsMm) {
+    val parsedMm = remember(numberText, unit) {
         val n = numberText.trim().replace(',', '.').toFloatOrNull()
-        val mm = if (n == null) null else if (unitIsMm) n else n * 10f
+        val mm = when (unit) {
+            UnitChoice.MM -> n
+            UnitChoice.CM -> n?.times(10f)
+            UnitChoice.M -> n?.times(1000f)
+        }
         mm?.takeIf { it > 0f }
     }
 
@@ -238,27 +253,24 @@ private fun MaxHeightDialog(
                 OutlinedTextField(
                     value = numberText,
                     onValueChange = { numberText = it },
-                    label = { Text(if (unitIsMm) "Height (mm)" else "Height (cm)") },
+                    label = {
+                        Text(
+                            when (unit) {
+                                UnitChoice.MM -> "Height (mm)"
+                                UnitChoice.CM -> "Height (cm)"
+                                UnitChoice.M -> "Height (m)"
+                            }
+                        )
+                    },
                     singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                         keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
                     )
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    FilterChip(selected = unitIsMm, onClick = {
-                        if (!unitIsMm) {
-                            val v = numberText.trim().replace(',', '.').toFloatOrNull()
-                            numberText = v?.let { (it * 10f).toInt().toString() } ?: numberText
-                            unitIsMm = true
-                        }
-                    }, label = { Text("mm") })
-                    FilterChip(selected = !unitIsMm, onClick = {
-                        if (unitIsMm) {
-                            val v = numberText.trim().replace(',', '.').toFloatOrNull()
-                            numberText = v?.let { (it / 10f).toString() } ?: numberText
-                            unitIsMm = false
-                        }
-                    }, label = { Text("cm") })
+                    FilterChip(selected = unit == UnitChoice.MM, onClick = { unit = UnitChoice.MM }, label = { Text("mm") })
+                    FilterChip(selected = unit == UnitChoice.CM, onClick = { unit = UnitChoice.CM }, label = { Text("cm") })
+                    FilterChip(selected = unit == UnitChoice.M, onClick = { unit = UnitChoice.M }, label = { Text("m") })
                 }
             }
         },

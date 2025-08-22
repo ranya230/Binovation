@@ -1,4 +1,3 @@
-// MainNavigation.kt
 package fr.isen.amara.isensmartcompanion
 
 import androidx.compose.runtime.Composable
@@ -50,7 +49,7 @@ fun MainNavigation() {
             composable("assistant") { AssistantScreen() }
             composable("settings") { SettingsScreen() }
 
-            // Routes supplémentaires existantes
+            // Extra écrans
             composable("binState") { BinStateScreen() }
             composable("binLevel") { BinLevelScreen() }
             composable("history") { HistoryScreen() }
