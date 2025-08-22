@@ -4,10 +4,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
@@ -21,6 +25,11 @@ fun RegisterScreen(
     val email = remember { mutableStateOf("") }
     val password = remember { mutableStateOf("") }
     val confirmPassword = remember { mutableStateOf("") }
+
+    // 👁️ Etats pour afficher/masquer les champs mdp
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -41,6 +50,7 @@ fun RegisterScreen(
                 onValueChange = { email.value = it },
                 label = { Text("Email") },
                 leadingIcon = { Icon(Icons.Default.Email, null) },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -51,7 +61,17 @@ fun RegisterScreen(
                 onValueChange = { password.value = it },
                 label = { Text("Mot de passe") },
                 leadingIcon = { Icon(Icons.Default.Lock, null) },
-                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (passwordVisible) "Masquer le mot de passe" else "Afficher le mot de passe"
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -62,7 +82,17 @@ fun RegisterScreen(
                 onValueChange = { confirmPassword.value = it },
                 label = { Text("Confirmer le mot de passe") },
                 leadingIcon = { Icon(Icons.Default.Lock, null) },
-                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { confirmPasswordVisible = !confirmPasswordVisible }) {
+                        Icon(
+                            imageVector = if (confirmPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (confirmPasswordVisible) "Masquer le mot de passe" else "Afficher le mot de passe"
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 
