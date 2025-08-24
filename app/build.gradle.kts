@@ -107,7 +107,6 @@ dependencies {
 
     // Coil (images)
     implementation("io.coil-kt:coil-compose:2.5.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.2")
 
     // ===== Tests / Debug =====
     testImplementation("junit:junit:4.13.2")
